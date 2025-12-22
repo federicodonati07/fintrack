@@ -25,6 +25,8 @@ import {
 } from "@heroicons/react/24/outline";
 import { signOut } from "firebase/auth";
 import { auth } from "@/lib/firebase";
+import { getUserDocument } from "@/lib/firestore";
+import { useEffect } from "react";
 
 interface NavItem {
   label: string;
@@ -42,37 +44,31 @@ const navigationItems: NavItem[] = [
     icon: HomeIcon,
   },
   {
-    label: "Conti / Fondi",
+    label: "Accounts / Funds",
+    href: "/dashboard/accounts",
     icon: BanknotesIcon,
-    children: [
-      { label: "Conti correnti", href: "/dashboard/accounts" },
-      { label: "Wallet", href: "/dashboard/wallet", icon: WalletIcon },
-      { label: "Carte", href: "/dashboard/cards", icon: CreditCardIcon },
-      { label: "Saldo per fondo", href: "/dashboard/balances" },
-    ],
   },
   {
-    label: "Transazioni",
+    label: "Transactions",
     icon: ArrowsRightLeftIcon,
     children: [
-      { label: "Entrate", href: "/dashboard/transactions/income" },
-      { label: "Uscite", href: "/dashboard/transactions/expenses" },
-      { label: "Tutte le transazioni", href: "/dashboard/transactions" },
+      { label: "Income / Expenses", href: "/dashboard/transactions" },
+      { label: "All Transactions", href: "/dashboard/transactions/all" },
     ],
   },
   {
-    label: "Categorie",
+    label: "Categories",
     href: "/dashboard/categories",
     icon: TagIcon,
   },
-  { divider: true, section: "Analisi" },
+  { divider: true, section: "Analysis" },
   {
-    label: "Report",
+    label: "Reports",
     icon: DocumentTextIcon,
     children: [
-      { label: "Report mensile", href: "/dashboard/reports/monthly" },
-      { label: "Report annuale", href: "/dashboard/reports/yearly" },
-      { label: "Breakdown categorie", href: "/dashboard/reports/categories" },
+      { label: "Monthly Report", href: "/dashboard/reports/monthly" },
+      { label: "Annual Report", href: "/dashboard/reports/yearly" },
+      { label: "Category Breakdown", href: "/dashboard/reports/categories" },
     ],
   },
   {
@@ -81,38 +77,20 @@ const navigationItems: NavItem[] = [
     icon: CurrencyEuroIcon,
   },
   {
-    label: "Obiettivi",
+    label: "Goals",
     href: "/dashboard/goals",
     icon: FlagIcon,
-  },
-  { divider: true, section: "Gestione" },
-  {
-    label: "Automazioni",
-    icon: BoltIcon,
-    children: [
-      { label: "Spese ricorrenti", href: "/dashboard/automations/recurring" },
-      { label: "Regole smart", href: "/dashboard/automations/rules" },
-    ],
-  },
-  {
-    label: "Integrazioni",
-    icon: ArrowsUpDownIcon,
-    children: [
-      { label: "Connessioni bancarie", href: "/dashboard/integrations/banks" },
-      { label: "Export CSV", href: "/dashboard/integrations/export" },
-      { label: "API", href: "/dashboard/integrations/api" },
-    ],
   },
 ];
 
 const accountItems: NavItem[] = [
   {
-    label: "Impostazioni",
+    label: "Settings",
     href: "/dashboard/settings",
     icon: Cog8ToothIcon,
   },
   {
-    label: "Piano",
+    label: "Plan",
     href: "/dashboard/plan",
     icon: ChartBarIcon,
   },
@@ -124,6 +102,23 @@ export default function Sidebar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [expandedItems, setExpandedItems] = useState<string[]>([]);
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+
+  useEffect(() => {
+    const checkAdmin = async () => {
+      const user = auth.currentUser;
+      if (user) {
+        setCurrentUserId(user.uid);
+        const userDoc = await getUserDocument(user.uid);
+        if (userDoc && (userDoc.role === "admin" || userDoc.plan === "admin")) {
+          setIsAdmin(true);
+        }
+      }
+    };
+
+    checkAdmin();
+  }, []);
 
   // Update main content padding when sidebar is collapsed
   const toggleCollapse = () => {
@@ -288,16 +283,35 @@ export default function Sidebar() {
           </div>
         )}
         <nav className="space-y-1">
+          {isAdmin && (
+            <button
+              onClick={() => {
+                router.push("/dashboard/admin");
+                setMobileOpen(false);
+              }}
+              className={`w-full flex items-center gap-3 px-3 py-2 text-sm font-medium rounded-lg transition-colors mb-1 cursor-pointer ${
+                pathname === "/dashboard/admin"
+                  ? "text-purple-600 bg-purple-50"
+                  : "text-gray-700 hover:text-purple-600 hover:bg-purple-50"
+              }`}
+              title={isCollapsed ? "Admin" : undefined}
+            >
+              <ShieldCheckIcon
+                className={`w-5 h-5 flex-shrink-0 ${pathname === "/dashboard/admin" ? "text-purple-600" : "text-gray-400"}`}
+              />
+              {!isCollapsed && "Admin Dashboard"}
+            </button>
+          )}
           {accountItems.map((item, index) => renderNavItem(item, index))}
         </nav>
         
         {/* Logout Button */}
         <button
           onClick={handleLogout}
-          className="w-full flex items-center gap-3 px-3 py-2 text-sm font-medium text-gray-700 hover:text-[#0F172A] hover:bg-gray-50 rounded-lg transition-colors mt-2 cursor-pointer"
+          className="w-full flex items-center gap-3 px-3 py-2 text-sm font-medium text-red-600 hover:text-red-700 hover:bg-red-50 rounded-lg transition-colors mt-2 cursor-pointer"
           title={isCollapsed ? "Logout" : undefined}
         >
-          <ArrowRightOnRectangleIcon className="w-5 h-5 flex-shrink-0" />
+          <ArrowRightOnRectangleIcon className="w-5 h-5 flex-shrink-0 text-red-600" />
           {!isCollapsed && "Logout"}
         </button>
       </div>

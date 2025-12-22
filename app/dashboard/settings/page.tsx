@@ -96,7 +96,7 @@ export default function SettingsPage() {
     if (!user) return;
 
     if (!deletePassword.trim()) {
-      setDeleteError("Please enter your password");
+      setDeleteError("Enter your password");
       return;
     }
 
@@ -108,7 +108,7 @@ export default function SettingsPage() {
       router.push("/");
     } catch (error: any) {
       console.error("Error deleting account:", error);
-      setDeleteError(error.message || "Failed to delete account. Please try again.");
+      setDeleteError(error.message || "Errore durante l'eliminazione dell'account. Riprova.");
       setIsDeleting(false);
     }
   };
@@ -139,8 +139,8 @@ export default function SettingsPage() {
           <ArrowLeftIcon className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
           Back
         </button>
-        <h1 className="text-2xl font-semibold text-[#0F172A]">Impostazioni</h1>
-        <p className="text-sm text-gray-500 mt-1">Gestisci profilo, password e account</p>
+        <h1 className="text-2xl font-semibold text-[#0F172A]">Settings</h1>
+        <p className="text-sm text-gray-500 mt-1">Manage your profile, password and account</p>
       </div>
 
       <main className="px-8 py-8 bg-gray-50">
@@ -152,8 +152,8 @@ export default function SettingsPage() {
                 <UserCircleIcon className="w-5 h-5 text-[#22C55E]" />
               </div>
               <div>
-                <h2 className="text-lg font-semibold text-[#0F172A]">Informazioni Profilo</h2>
-                <p className="text-sm text-gray-500">I tuoi dati personali</p>
+                <h2 className="text-lg font-semibold text-[#0F172A]">Profile Information</h2>
+                <p className="text-sm text-gray-500">Your personal data</p>
               </div>
             </div>
 
@@ -166,20 +166,20 @@ export default function SettingsPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-500 mb-1">Nome</label>
+                <label className="block text-sm font-medium text-gray-500 mb-1">Name</label>
                 <div className="px-4 py-3 bg-gray-50 rounded-xl border border-gray-200">
                   <p className="text-sm text-[#0F172A]">
-                    {user?.displayName || "Non impostato"}
+                    {user?.displayName || "Not set"}
                   </p>
                 </div>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-500 mb-1">Account creato</label>
+                <label className="block text-sm font-medium text-gray-500 mb-1">Account created</label>
                 <div className="px-4 py-3 bg-gray-50 rounded-xl border border-gray-200">
                   <p className="text-sm text-[#0F172A]">
                     {user?.metadata.creationTime
-                      ? new Date(user.metadata.creationTime).toLocaleDateString("it-IT", {
+                      ? new Date(user.metadata.creationTime).toLocaleDateString("en-US", {
                           day: "numeric",
                           month: "long",
                           year: "numeric",
@@ -190,11 +190,11 @@ export default function SettingsPage() {
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-500 mb-1">Ultimo accesso</label>
+                <label className="block text-sm font-medium text-gray-500 mb-1">Last access</label>
                 <div className="px-4 py-3 bg-gray-50 rounded-xl border border-gray-200">
                   <p className="text-sm text-[#0F172A]">
                     {user?.metadata.lastSignInTime
-                      ? new Date(user.metadata.lastSignInTime).toLocaleDateString("it-IT", {
+                      ? new Date(user.metadata.lastSignInTime).toLocaleDateString("en-US", {
                           day: "numeric",
                           month: "long",
                           year: "numeric",
@@ -217,15 +217,15 @@ export default function SettingsPage() {
                   <KeyIcon className="w-5 h-5 text-[#22C55E]" />
                 </div>
                 <div>
-                  <h2 className="text-lg font-semibold text-[#0F172A]">Cambia Password</h2>
-                  <p className="text-sm text-gray-500">Aggiorna la tua password per mantenere l'account sicuro</p>
+                  <h2 className="text-lg font-semibold text-[#0F172A]">Change Password</h2>
+                  <p className="text-sm text-gray-500">Update your password to keep your account secure</p>
                 </div>
               </div>
 
             <form onSubmit={handlePasswordChange} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Nuova Password
+                  New Password
                 </label>
                 <input
                   type="password"
@@ -234,14 +234,14 @@ export default function SettingsPage() {
                     setNewPassword(e.target.value);
                     setPasswordError("");
                   }}
-                  placeholder="Almeno 6 caratteri"
+                  placeholder="At least 6 characters"
                   className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-[#22C55E] focus:border-transparent outline-none transition-all"
                 />
               </div>
 
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  Conferma Nuova Password
+                  Confirm New Password
                 </label>
                 <input
                   type="password"
@@ -250,7 +250,7 @@ export default function SettingsPage() {
                     setConfirmPassword(e.target.value);
                     setPasswordError("");
                   }}
-                  placeholder="Ripeti la nuova password"
+                  placeholder="Repeat the new password"
                   className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-[#22C55E] focus:border-transparent outline-none transition-all"
                 />
               </div>
@@ -277,10 +277,10 @@ export default function SettingsPage() {
                 {isUpdatingPassword ? (
                   <div className="flex items-center justify-center gap-2">
                     <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                    Aggiornamento...
+                    Updating...
                   </div>
                 ) : (
-                  "Aggiorna Password"
+                  "Update Password"
                 )}
               </button>
             </form>
@@ -293,15 +293,15 @@ export default function SettingsPage() {
                 <TrashIcon className="w-5 h-5 text-red-600" />
               </div>
               <div>
-                <h2 className="text-lg font-semibold text-[#0F172A]">Elimina Account</h2>
-                <p className="text-sm text-gray-500">Rimuovi permanentemente il tuo account e tutti i dati</p>
+                <h2 className="text-lg font-semibold text-[#0F172A]">Delete Account</h2>
+                <p className="text-sm text-gray-500">Permanently remove your account and all data</p>
               </div>
             </div>
 
             <div className="bg-red-50 border border-red-200 rounded-xl p-4 mb-6">
               <p className="text-sm text-red-800">
-                <strong>Attenzione:</strong> Questa azione è irreversibile. Tutti i tuoi dati verranno
-                eliminati permanentemente.
+                <strong>Warning:</strong> This action is irreversible. All your data will be
+                permanently deleted.
               </p>
             </div>
 
@@ -309,7 +309,7 @@ export default function SettingsPage() {
               onClick={() => setDeleteModalOpen(true)}
               className="w-full py-3 rounded-full text-sm font-medium text-white bg-red-600 hover:bg-red-700 transition-colors cursor-pointer"
             >
-              Elimina Account
+              Delete Account
             </button>
             </div>
           </div>
@@ -351,38 +351,41 @@ export default function SettingsPage() {
                   </div>
 
                   <Dialog.Title className="text-xl font-semibold text-center text-[#0F172A] mb-3">
-                    Elimina Account?
+                    Delete Account?
                   </Dialog.Title>
 
                   <p className="text-sm text-gray-600 text-center mb-6">
-                    Questa azione non può essere annullata. Tutti i tuoi dati verranno eliminati
-                    permanentemente, inclusi:
+                    This action cannot be undone. All your data will be permanently deleted,
+                    including:
                   </p>
 
                   <ul className="text-sm text-gray-700 space-y-2 mb-6">
                     <li className="flex items-center gap-2">
                       <div className="w-1.5 h-1.5 rounded-full bg-red-500"></div>
-                      Tutti i conti e fondi
+                      All accounts and funds
                     </li>
                     <li className="flex items-center gap-2">
                       <div className="w-1.5 h-1.5 rounded-full bg-red-500"></div>
-                      Tutte le transazioni e lo storico
+                      All transactions and history
                     </li>
                     <li className="flex items-center gap-2">
                       <div className="w-1.5 h-1.5 rounded-full bg-red-500"></div>
-                      Categorie, budget e obiettivi
+                      Categories, budgets and goals
                     </li>
                     <li className="flex items-center gap-2">
                       <div className="w-1.5 h-1.5 rounded-full bg-red-500"></div>
-                      Il tuo account e profilo
+                      Your account and profile
                     </li>
                   </ul>
 
                   {/* Password Input */}
                   <div className="mb-6">
                     <label className="block text-sm font-medium text-gray-700 mb-2">
-                      Inserisci la tua password per confermare
+                      Enter your password to confirm
                     </label>
+                    <p className="text-xs text-gray-500 mb-3">
+                      Use the same password you used to log in
+                    </p>
                     <input
                       type="password"
                       value={deletePassword}
@@ -391,11 +394,12 @@ export default function SettingsPage() {
                         setDeleteError("");
                       }}
                       disabled={isDeleting}
-                      placeholder="La tua password"
+                      placeholder="Your password"
+                      autoFocus
                       className="w-full px-4 py-3 border border-gray-300 rounded-xl focus:ring-2 focus:ring-red-500 focus:border-transparent outline-none transition-all disabled:opacity-50 disabled:cursor-not-allowed"
                     />
                     {deleteError && (
-                      <p className="mt-2 text-sm text-red-600 flex items-center gap-1">
+                      <p className="mt-2 text-sm text-red-600 flex items-center gap-1 font-medium">
                         <ExclamationTriangleIcon className="w-4 h-4" />
                         {deleteError}
                       </p>
@@ -408,7 +412,7 @@ export default function SettingsPage() {
                       disabled={isDeleting}
                       className="flex-1 py-3 rounded-full text-sm font-medium text-gray-700 bg-gray-100 hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                     >
-                      Annulla
+                      Cancel
                     </button>
                     <button
                       onClick={handleDeleteAccount}
@@ -418,10 +422,10 @@ export default function SettingsPage() {
                       {isDeleting ? (
                         <div className="flex items-center justify-center gap-2">
                           <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                          Eliminazione...
+                          Deleting...
                         </div>
                       ) : (
-                        "Elimina Definitivamente"
+                        "Delete Permanently"
                       )}
                     </button>
                   </div>

@@ -47,7 +47,7 @@ export default function PlanPage() {
   // Check for cancelled checkout
   useEffect(() => {
     if (searchParams.get("checkout") === "cancel") {
-      showToast("Pagamento annullato.", "info");
+      showToast("Payment cancelled.", "info");
       // Remove query params
       window.history.replaceState({}, "", "/dashboard/plan");
     }
@@ -412,9 +412,9 @@ export default function PlanPage() {
                         Caricamento...
                       </div>
                     ) : isCurrent ? (
-                      "Piano Attuale"
+                      "Current Plan"
                     ) : isUpgrade ? (
-                      `Passa a ${plan.name}`
+                      `Upgrade to ${plan.name}`
                     ) : isDowngrade ? (
                       `Passa a ${plan.name}`
                     ) : (

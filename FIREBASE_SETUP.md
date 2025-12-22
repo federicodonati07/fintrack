@@ -72,3 +72,5 @@ Dopo aver configurato tutto:
 - Il problema è sempre nella configurazione di Firebase Console, non nel codice
 
 
+
+

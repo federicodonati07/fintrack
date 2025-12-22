@@ -315,11 +315,11 @@ export default function AuthPage() {
           {mode === "register" && (
             <div>
               <label className="block text-sm font-medium text-[#1E293B] mb-2">
-                Full Name
+                Nome e Cognome
               </label>
               <Input
                 type="text"
-                placeholder="Enter your name"
+                placeholder="Es. Mario Rossi"
                 value={name}
                 onChange={(e) => setName(e.target.value)}
                 required
