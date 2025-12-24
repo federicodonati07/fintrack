@@ -680,6 +680,26 @@ export async function createAccount(
     updatedAt: serverTimestamp(),
   });
   
+  // Create initial balance transaction if balance > 0
+  if (accountData.initialBalance > 0) {
+    const transactionsRef = collection(db, "users", userId, "transactions");
+    const newTransactionRef = doc(transactionsRef);
+    
+    await setDoc(newTransactionRef, {
+      type: "income",
+      amount: accountData.initialBalance,
+      accountId: newAccountRef.id,
+      incomeCategory: "other",
+      description: `Initial balance for ${accountData.name}`,
+      date: serverTimestamp(),
+      status: "completed",
+      isRecurring: false,
+      isInitialBalance: true,
+      createdAt: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  }
+  
   return newAccountRef.id;
 }
 
@@ -895,6 +915,26 @@ export async function createSubAccount(
     updatedAt: serverTimestamp(),
   });
 
+  // Create transaction record for partition creation
+  const transactionsRef = collection(db, "users", userId, "transactions");
+  const newTransactionRef = doc(transactionsRef);
+  const parentAccountData = parentAccountSnap.data();
+  
+  await setDoc(newTransactionRef, {
+    type: "partition_creation",
+    amount: subAccountBalance,
+    accountId: accountId,
+    subAccountId: newSubAccountRef.id,
+    subAccountName: subAccountData.name,
+    subAccountType: subAccountData.type,
+    description: `Created ${subAccountData.type} partition "${subAccountData.name}" in ${parentAccountData.name}`,
+    date: serverTimestamp(),
+    status: "completed",
+    isRecurring: false,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
   return newSubAccountRef.id;
 }
 
@@ -1045,6 +1085,31 @@ export async function transferSubAccountFunds(
       updatedAt: serverTimestamp(),
     });
   }
+
+  // Create transaction record for this transfer
+  const transactionsRef = collection(db, "users", userId, "transactions");
+  const newTransactionRef = doc(transactionsRef);
+  
+  const subAccountData = subAccountSnap.data();
+  const parentAccountData = parentAccountSnap.data();
+  
+  await setDoc(newTransactionRef, {
+    type: direction === "toSubAccount" ? "partition_transfer_to" : "partition_transfer_from",
+    amount: amount,
+    accountId: accountId,
+    subAccountId: subAccountId,
+    subAccountName: subAccountData.name,
+    subAccountType: subAccountData.type,
+    direction: direction,
+    description: direction === "toSubAccount" 
+      ? `Transfer from ${parentAccountData.name} to partition ${subAccountData.name}`
+      : `Transfer from partition ${subAccountData.name} to ${parentAccountData.name}`,
+    date: serverTimestamp(),
+    status: "completed",
+    isRecurring: false,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
 
   return {
     parentBalance: direction === "toSubAccount" ? parentBalance - amount : parentBalance + amount,
@@ -1255,10 +1320,36 @@ export async function updateTransaction(
 }
 
 /**
- * Delete a transaction
+ * Delete a transaction and reverse its effects on account balances
  */
 export async function deleteTransaction(userId: string, transactionId: string) {
   const transactionRef = doc(db, "users", userId, "transactions", transactionId);
+  const transactionSnap = await getDoc(transactionRef);
+  
+  if (!transactionSnap.exists()) {
+    throw new Error("Transaction not found");
+  }
+  
+  const transaction = transactionSnap.data();
+  
+  // Reverse the transaction effects on accounts
+  if (transaction.type === "income") {
+    // Subtract the income from the account
+    await updateAccountBalance(userId, transaction.accountId, transaction.amount, "subtract");
+  } else if (transaction.type === "expense") {
+    // Add back the expense to the account
+    await updateAccountBalance(userId, transaction.accountId, transaction.amount, "add");
+  } else if (transaction.type === "transfer") {
+    // Reverse the transfer
+    if (transaction.accountId && transaction.toAccountId) {
+      // Add back to source account
+      await updateAccountBalance(userId, transaction.accountId, transaction.amount, "add");
+      // Subtract from destination account
+      await updateAccountBalance(userId, transaction.toAccountId, transaction.amount, "subtract");
+    }
+  }
+  
+  // Delete the transaction
   await deleteDoc(transactionRef);
 }
 

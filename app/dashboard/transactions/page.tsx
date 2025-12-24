@@ -10,6 +10,7 @@ import {
   createTransaction,
   getTransactions,
   getUserCategories,
+  deleteTransaction,
 } from "@/lib/firestore";
 import { User, Account, Category, Transaction } from "@/lib/types";
 import { Button } from "@heroui/react";
@@ -24,6 +25,7 @@ import {
   TagIcon,
   ClockIcon,
   CheckIcon,
+  TrashIcon,
 } from "@heroicons/react/24/outline";
 import { useToast } from "@/hooks/useToast";
 
@@ -178,6 +180,29 @@ export default function TransactionsPage() {
     resetForm();
   };
 
+  const handleDeleteTransaction = async (transactionId: string) => {
+    if (!user) return;
+
+    if (!confirm("Are you sure you want to delete this transaction? This will reverse its effects on your account balances.")) {
+      return;
+    }
+
+    try {
+      await deleteTransaction(user.uid, transactionId);
+      
+      // Reload data
+      const userAccounts = await getAccounts(user.uid);
+      setAccounts(userAccounts);
+      const transactions = await getTransactions(user.uid);
+      setRecentTransactions(transactions.slice(0, 5));
+      
+      showToast("✅ Transaction deleted successfully!", "success");
+    } catch (error: any) {
+      console.error("Error deleting transaction:", error);
+      showToast(`❌ ${error.message || "Error deleting transaction"}`, "error");
+    }
+  };
+
   const activeAccounts = accounts.filter((a) => !a.archived);
   const activeCategories = categories.filter((c) => !c.archived);
 
@@ -193,12 +218,15 @@ export default function TransactionsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-gray-50 to-zinc-50 p-6">
       <div className="max-w-7xl mx-auto">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-4xl font-black text-[#0F172A] mb-2">Income / Expenses</h1>
-          <p className="text-gray-600">Manage your income, expenses, and transfers</p>
+        {/* Header with Premium Design */}
+        <div className="mb-8 relative">
+          <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 via-purple-500/5 to-pink-500/5 blur-3xl -z-10"></div>
+          <h1 className="text-5xl font-black bg-gradient-to-r from-[#0F172A] via-gray-800 to-[#0F172A] bg-clip-text text-transparent mb-3">
+            Income / Expenses
+          </h1>
+          <p className="text-gray-600 text-lg">Manage your income, expenses, and transfers with ease</p>
         </div>
 
         {/* Quick Actions */}
@@ -284,50 +312,85 @@ export default function TransactionsPage() {
                       return (
                         <div
                           key={transaction.id}
-                          className="flex items-center gap-4 p-4 rounded-2xl bg-gray-50 hover:bg-gray-100 transition-colors"
+                          className="group flex items-center gap-4 p-5 rounded-2xl bg-gradient-to-br from-white to-gray-50 border-2 border-gray-100 hover:border-gray-200 hover:shadow-lg transition-all duration-200"
                         >
                           <div
-                            className={`w-12 h-12 rounded-xl flex items-center justify-center ${
+                            className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-md group-hover:scale-105 transition-transform bg-gradient-to-br ${
                               transaction.type === "income"
-                                ? "bg-green-100"
+                                ? "from-green-500 to-emerald-600"
                                 : transaction.type === "expense"
-                                ? "bg-red-100"
-                                : "bg-blue-100"
+                                ? "from-red-500 to-rose-600"
+                                : transaction.type.startsWith("partition")
+                                ? "from-purple-500 to-pink-600"
+                                : "from-blue-500 to-cyan-600"
                             }`}
                           >
                             {transaction.type === "income" ? (
-                              <ArrowUpIcon className="w-6 h-6 text-green-600" />
+                              <ArrowUpIcon className="w-7 h-7 text-white" />
                             ) : transaction.type === "expense" ? (
-                              <ArrowDownIcon className="w-6 h-6 text-red-600" />
+                              <ArrowDownIcon className="w-7 h-7 text-white" />
+                            ) : transaction.type.startsWith("partition") ? (
+                              <span className="text-2xl">📊</span>
                             ) : (
-                              <ArrowsRightLeftIcon className="w-6 h-6 text-blue-600" />
+                              <ArrowsRightLeftIcon className="w-7 h-7 text-white" />
                             )}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="font-semibold text-[#0F172A] truncate">{transaction.description}</p>
-                            <p className="text-sm text-gray-500">
-                              {transaction.type === "transfer"
-                                ? `${account?.name} → ${toAccount?.name}`
-                                : account?.name}
-                              {transaction.type === "expense" && category && ` • ${category.name}`}
-                            </p>
+                            <p className="font-bold text-[#0F172A] truncate text-base mb-1">{transaction.description}</p>
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="text-xs font-semibold text-gray-600 bg-gray-100 px-2.5 py-1 rounded-full">
+                                {transaction.type === "transfer"
+                                  ? `${account?.name} → ${toAccount?.name}`
+                                  : account?.name}
+                              </span>
+                              {transaction.type === "expense" && category && (
+                                <span
+                                  className="text-xs font-bold px-2.5 py-1 rounded-full text-white"
+                                  style={{ backgroundColor: category.color || "#6B7280" }}
+                                >
+                                  {category.name}
+                                </span>
+                              )}
+                              <span className="text-xs text-gray-500">
+                                {transaction.date.toDate().toLocaleDateString("en-US", {
+                                  month: "short",
+                                  day: "numeric"
+                                })}
+                              </span>
+                              {transaction.type.startsWith("partition") && (
+                                <span className="text-xs text-purple-700 bg-purple-100 px-2.5 py-1 rounded-full font-bold">
+                                  📊 Partition
+                                </span>
+                              )}
+                            </div>
                           </div>
-                          <div className="text-right">
-                            <p
-                              className={`font-bold text-lg ${
-                                transaction.type === "income"
-                                  ? "text-green-600"
-                                  : transaction.type === "expense"
-                                  ? "text-red-600"
-                                  : "text-blue-600"
-                              }`}
+                          <div className="flex items-center gap-3">
+                            <div className="text-right">
+                              <p
+                                className={`font-black text-xl ${
+                                  transaction.type === "income"
+                                    ? "text-green-600"
+                                    : transaction.type === "expense"
+                                    ? "text-red-600"
+                                    : transaction.type.startsWith("partition")
+                                    ? "text-purple-600"
+                                    : "text-blue-600"
+                                }`}
+                              >
+                                {transaction.type === "expense" ? "-" : transaction.type === "income" ? "+" : ""}€
+                                {transaction.amount.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                              </p>
+                            </div>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteTransaction(transaction.id);
+                              }}
+                              className="opacity-0 group-hover:opacity-100 transition-opacity p-2.5 text-red-600 hover:bg-red-50 rounded-xl"
+                              title="Delete transaction"
                             >
-                              {transaction.type === "expense" ? "-" : "+"}€
-                              {transaction.amount.toLocaleString("en-US", { minimumFractionDigits: 2 })}
-                            </p>
-                            <p className="text-xs text-gray-400">
-                              {transaction.date.toDate().toLocaleDateString("en-US")}
-                            </p>
+                              <TrashIcon className="w-5 h-5" />
+                            </button>
                           </div>
                         </div>
                       );

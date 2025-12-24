@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged, signOut, User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { getUserDocument, getUserCategories, getUserFunds, getPlanLimits, getAccounts, getSubAccounts } from "@/lib/firestore";
+import { getUserDocument, getUserCategories, getUserFunds, getPlanLimits, getAccounts, getSubAccounts, getTransactions } from "@/lib/firestore";
 import { Button, Card, CardBody, Chip, Progress } from "@heroui/react";
 import {
   UserIcon,
@@ -20,6 +20,9 @@ import {
   SparklesIcon,
   CalendarIcon,
   ShieldCheckIcon,
+  ArrowUpIcon,
+  ArrowDownIcon,
+  ArrowsRightLeftIcon,
 } from "@heroicons/react/24/outline";
 import Toast from "@/components/Toast";
 import { useToast } from "@/hooks/useToast";
@@ -36,8 +39,11 @@ export default function DashboardPage() {
   const [categoriesCount, setCategoriesCount] = useState(0);
   const [accountsCount, setAccountsCount] = useState(0);
   const [totalBalance, setTotalBalance] = useState(0);
+  const [monthlyIncome, setMonthlyIncome] = useState(0);
+  const [monthlyExpenses, setMonthlyExpenses] = useState(0);
   const [limits, setLimits] = useState({ accounts: 1, categories: 10 });
   const [isAdmin, setIsAdmin] = useState(false);
+  const [recentTransactions, setRecentTransactions] = useState<any[]>([]);
   const router = useRouter();
   const { toast, showToast, hideToast } = useToast();
 
@@ -90,6 +96,32 @@ export default function DashboardPage() {
           }
         }
         setTotalBalance(total);
+
+        // Fetch recent transactions (last 5)
+        const transactions = await getTransactions(currentUser.uid);
+        setRecentTransactions(transactions.slice(0, 5));
+
+        // Calculate monthly income and expenses
+        const now = new Date();
+        const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+        const lastDayOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+        
+        let income = 0;
+        let expenses = 0;
+        
+        transactions.forEach((transaction) => {
+          const transactionDate = transaction.date?.toDate ? transaction.date.toDate() : new Date(transaction.date);
+          if (transactionDate >= firstDayOfMonth && transactionDate <= lastDayOfMonth) {
+            if (transaction.type === "income") {
+              income += transaction.amount;
+            } else if (transaction.type === "expense") {
+              expenses += transaction.amount;
+            }
+          }
+        });
+        
+        setMonthlyIncome(income);
+        setMonthlyExpenses(expenses);
       } catch (error) {
         console.error("Error fetching user document:", error);
       }
@@ -343,7 +375,7 @@ export default function DashboardPage() {
           </Card>
 
           {/* Income Card */}
-          <Card className="border-0 shadow-md hover:shadow-xl transition-all duration-300 bg-gradient-to-br from-white via-white to-green-50/30 hover:scale-[1.02] rounded-2xl">
+          <Card className="border-0 shadow-md hover:shadow-xl transition-all duration-300 bg-gradient-to-br from-white via-white to-green-50/30 hover:scale-[1.02] rounded-2xl cursor-pointer" onClick={() => router.push("/dashboard/transactions")}>
             <CardBody className="p-6">
               <div className="flex items-start justify-between mb-4">
                 <div className="p-3 bg-gradient-to-br from-green-500 to-green-600 rounded-2xl shadow-lg shadow-green-500/30">
@@ -353,13 +385,13 @@ export default function DashboardPage() {
               <p className="text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">
                 Income
               </p>
-              <p className="text-3xl font-bold text-[#0F172A] mb-1">€0.00</p>
+              <p className="text-3xl font-bold text-green-600 mb-1">€{monthlyIncome.toFixed(2)}</p>
               <p className="text-xs text-gray-400">This month</p>
             </CardBody>
           </Card>
 
           {/* Expenses Card */}
-          <Card className="border-0 shadow-md hover:shadow-xl transition-all duration-300 bg-gradient-to-br from-white via-white to-orange-50/30 hover:scale-[1.02] rounded-2xl">
+          <Card className="border-0 shadow-md hover:shadow-xl transition-all duration-300 bg-gradient-to-br from-white via-white to-orange-50/30 hover:scale-[1.02] rounded-2xl cursor-pointer" onClick={() => router.push("/dashboard/transactions")}>
             <CardBody className="p-6">
               <div className="flex items-start justify-between mb-4">
                 <div className="p-3 bg-gradient-to-br from-orange-500 to-orange-600 rounded-2xl shadow-lg shadow-orange-500/30">
@@ -369,7 +401,7 @@ export default function DashboardPage() {
               <p className="text-xs font-medium text-gray-500 mb-1 uppercase tracking-wide">
                 Expenses
               </p>
-              <p className="text-3xl font-bold text-[#0F172A] mb-1">€0.00</p>
+              <p className="text-3xl font-bold text-orange-600 mb-1">€{monthlyExpenses.toFixed(2)}</p>
               <p className="text-xs text-gray-400">This month</p>
             </CardBody>
           </Card>
@@ -503,6 +535,20 @@ export default function DashboardPage() {
               </div>
               <div className="space-y-3">
                 <Button
+                  onClick={() => router.push("/dashboard/transactions")}
+                  className="w-full justify-start bg-gradient-to-br from-green-50 via-emerald-50 to-green-50 hover:from-green-100 hover:to-emerald-100 text-[#0F172A] border-2 border-green-200 hover:border-green-400 rounded-2xl shadow-md hover:shadow-lg transition-all group"
+                  startContent={
+                    <div className="p-2 bg-gradient-to-br from-green-500 to-emerald-600 rounded-xl group-hover:scale-110 transition-transform shadow-lg">
+                      <BanknotesIcon className="w-4 h-4 text-white" />
+                    </div>
+                  }
+                  endContent={
+                    <ArrowRightIcon className="w-4 h-4 text-green-600 group-hover:translate-x-1 transition-transform" />
+                  }
+                >
+                  <span className="font-bold">Add Transaction</span>
+                </Button>
+                <Button
                   onClick={() => router.push("/dashboard/accounts")}
                   className="w-full justify-start bg-gradient-to-br from-gray-50 to-white hover:from-[#22C55E]/10 hover:to-[#22C55E]/5 text-[#0F172A] border border-gray-200 hover:border-[#22C55E]/50 rounded-2xl shadow-sm hover:shadow-md transition-all group"
                   startContent={
@@ -514,7 +560,7 @@ export default function DashboardPage() {
                     <ArrowRightIcon className="w-4 h-4 text-gray-400 group-hover:translate-x-1 transition-transform" />
                   }
                 >
-                  Gestisci Conti
+                  Manage Accounts
                 </Button>
                 <Button
                   className="w-full justify-start bg-gradient-to-br from-gray-50 to-white hover:from-blue-50 hover:to-blue-50/50 text-[#0F172A] border border-gray-200 hover:border-blue-500/50 rounded-2xl shadow-sm hover:shadow-md transition-all group"
@@ -547,6 +593,118 @@ export default function DashboardPage() {
             </CardBody>
           </Card>
         </div>
+
+        {/* Recent Transactions */}
+        <Card className="border-0 shadow-md hover:shadow-lg transition-shadow bg-white rounded-2xl">
+          <CardBody className="p-7">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-xl font-bold text-[#0F172A] mb-1">Recent Transactions</h2>
+                <p className="text-sm text-gray-500">Your latest financial activity</p>
+              </div>
+              <Button
+                size="sm"
+                className="bg-gradient-to-r from-blue-500 to-blue-600 text-white rounded-full hover:shadow-lg hover:shadow-blue-500/30 transition-all px-5"
+                onClick={() => router.push("/dashboard/transactions/all")}
+                endContent={<ArrowRightIcon className="w-4 h-4" />}
+              >
+                View All
+              </Button>
+            </div>
+
+            {recentTransactions.length === 0 ? (
+              <div className="text-center py-12">
+                <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4">
+                  <BanknotesIcon className="w-8 h-8 text-gray-400" />
+                </div>
+                <p className="text-gray-500 font-medium mb-2">No transactions yet</p>
+                <p className="text-sm text-gray-400 mb-4">Start by adding your first transaction</p>
+                <Button
+                  className="bg-gradient-to-r from-[#22C55E] to-[#16A34A] text-white rounded-full hover:shadow-lg transition-all"
+                  onClick={() => router.push("/dashboard/transactions")}
+                  startContent={<BanknotesIcon className="w-5 h-5" />}
+                >
+                  Add Transaction
+                </Button>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {recentTransactions.map((transaction) => {
+                  const transactionDate = transaction.date?.toDate ? transaction.date.toDate() : new Date(transaction.date);
+                  const typeIcon = transaction.type === "income" ? ArrowUpIcon : 
+                                  transaction.type === "expense" ? ArrowDownIcon :
+                                  transaction.type.startsWith("partition") ? "📊" :
+                                  ArrowsRightLeftIcon;
+                  const iconBg = transaction.type === "income" ? "from-green-500 to-emerald-600" : 
+                                   transaction.type === "expense" ? "from-red-500 to-rose-600" : 
+                                   transaction.type.startsWith("partition") ? "from-purple-500 to-pink-600" :
+                                   "from-blue-500 to-cyan-600";
+                  const TypeIcon = typeof typeIcon === "string" ? null : typeIcon;
+
+                  return (
+                    <div
+                      key={transaction.id}
+                      className="group flex items-center justify-between p-5 bg-gradient-to-br from-white to-gray-50 rounded-2xl border-2 border-gray-100 hover:border-gray-200 hover:shadow-xl hover:scale-[1.02] transition-all duration-300 cursor-pointer"
+                      onClick={() => router.push("/dashboard/transactions/all")}
+                    >
+                      <div className="flex items-center gap-4">
+                        <div className={`p-3.5 rounded-2xl bg-gradient-to-br ${iconBg} shadow-lg group-hover:scale-110 transition-transform`}>
+                          {TypeIcon ? (
+                            <TypeIcon className="w-6 h-6 text-white" />
+                          ) : (
+                            <span className="text-2xl">{typeIcon}</span>
+                          )}
+                        </div>
+                        <div>
+                          <p className="font-bold text-[#0F172A] mb-1 text-base">{transaction.description}</p>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="text-xs text-gray-500 bg-gray-100 px-2.5 py-1 rounded-full font-medium">
+                              {transactionDate.toLocaleDateString("en-US", { 
+                                month: "short", 
+                                day: "numeric", 
+                                year: "numeric" 
+                              })}
+                            </span>
+                            {transaction.category && (
+                              <span className="text-xs text-gray-700 bg-gray-200 px-2.5 py-1 rounded-full font-semibold capitalize">
+                                {transaction.category}
+                              </span>
+                            )}
+                            {transaction.incomeCategory && (
+                              <span className="text-xs text-green-700 bg-green-100 px-2.5 py-1 rounded-full font-semibold capitalize">
+                                {transaction.incomeCategory}
+                              </span>
+                            )}
+                            {transaction.isRecurring && (
+                              <span className="text-xs text-purple-700 bg-gradient-to-r from-purple-100 to-pink-100 px-2.5 py-1 rounded-full font-bold">
+                                🔄 Recurring
+                              </span>
+                            )}
+                            {transaction.type.startsWith("partition") && (
+                              <span className="text-xs text-purple-700 bg-purple-100 px-2.5 py-1 rounded-full font-bold">
+                                📊 Partition
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                      <div className="text-right">
+                        <p className={`text-xl font-black ${
+                          transaction.type === "income" ? "text-green-600" : 
+                          transaction.type === "expense" ? "text-red-600" : 
+                          transaction.type.startsWith("partition") ? "text-purple-600" :
+                          "text-blue-600"
+                        }`}>
+                          {transaction.type === "expense" ? "-" : transaction.type === "income" ? "+" : ""}€{transaction.amount.toFixed(2)}
+                        </p>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </CardBody>
+        </Card>
 
         {/* Getting Started */}
         <Card className="border-0 shadow-md hover:shadow-lg transition-shadow bg-gradient-to-br from-[#22C55E]/5 via-[#A7F3D0]/10 to-white rounded-2xl relative overflow-hidden">

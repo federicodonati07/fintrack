@@ -9,6 +9,7 @@ import {
   getAccounts,
   getTransactions,
   getUserCategories,
+  deleteTransaction,
 } from "@/lib/firestore";
 import { User, Account, Category } from "@/lib/types";
 import {
@@ -19,6 +20,7 @@ import {
   FunnelIcon,
   XMarkIcon,
   CalendarIcon,
+  TrashIcon,
 } from "@heroicons/react/24/outline";
 import { useToast } from "@/hooks/useToast";
 
@@ -146,6 +148,31 @@ export default function AllTransactionsPage() {
     });
   };
 
+  const handleDeleteTransaction = async (transactionId: string) => {
+    if (!user) return;
+
+    if (!confirm("Are you sure you want to delete this transaction? This will reverse its effects on your account balances.")) {
+      return;
+    }
+
+    try {
+      await deleteTransaction(user.uid, transactionId);
+      
+      // Reload transactions and accounts
+      const transactions = await getTransactions(user.uid);
+      setAllTransactions(transactions);
+      setFilteredTransactions(transactions);
+      
+      const userAccounts = await getAccounts(user.uid);
+      setAccounts(userAccounts);
+      
+      showToast("✅ Transaction deleted successfully!", "success");
+    } catch (error: any) {
+      console.error("Error deleting transaction:", error);
+      showToast(`❌ ${error.message || "Error deleting transaction"}`, "error");
+    }
+  };
+
   const activeFiltersCount = 
     (filters.type !== "all" ? 1 : 0) +
     (filters.accountId !== "all" ? 1 : 0) +
@@ -224,6 +251,9 @@ export default function AllTransactionsPage() {
                   <option value="income">Income</option>
                   <option value="expense">Expense</option>
                   <option value="transfer">Transfer</option>
+                  <option value="partition_creation">Partition Creation</option>
+                  <option value="partition_transfer_to">To Partition</option>
+                  <option value="partition_transfer_from">From Partition</option>
                 </select>
               </div>
 
@@ -395,54 +425,54 @@ export default function AllTransactionsPage() {
                 return (
                   <div
                     key={transaction.id}
-                    className="flex items-center gap-4 p-6 hover:bg-gray-50 transition-colors"
+                    className="group flex items-center gap-4 p-6 hover:bg-gradient-to-r hover:from-gray-50 hover:to-white transition-all duration-200 border-b border-gray-100 last:border-b-0"
                   >
                     {/* Icon */}
                     <div
-                      className={`w-14 h-14 rounded-2xl flex items-center justify-center flex-shrink-0 ${
+                      className={`w-16 h-16 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lg group-hover:scale-105 transition-transform ${
                         transaction.type === "income"
-                          ? "bg-gradient-to-br from-green-100 to-emerald-100"
+                          ? "bg-gradient-to-br from-green-500 to-emerald-600"
                           : transaction.type === "expense"
-                          ? "bg-gradient-to-br from-red-100 to-rose-100"
-                          : "bg-gradient-to-br from-blue-100 to-cyan-100"
+                          ? "bg-gradient-to-br from-red-500 to-rose-600"
+                          : transaction.type.startsWith("partition")
+                          ? "bg-gradient-to-br from-purple-500 to-pink-600"
+                          : "bg-gradient-to-br from-blue-500 to-cyan-600"
                       }`}
                     >
                       {transaction.type === "income" ? (
-                        <ArrowUpIcon className="w-7 h-7 text-green-600" />
+                        <ArrowUpIcon className="w-8 h-8 text-white" />
                       ) : transaction.type === "expense" ? (
-                        <ArrowDownIcon className="w-7 h-7 text-red-600" />
+                        <ArrowDownIcon className="w-8 h-8 text-white" />
+                      ) : transaction.type.startsWith("partition") ? (
+                        <span className="text-2xl">📊</span>
                       ) : (
-                        <ArrowsRightLeftIcon className="w-7 h-7 text-blue-600" />
+                        <ArrowsRightLeftIcon className="w-8 h-8 text-white" />
                       )}
                     </div>
 
                     {/* Details */}
                     <div className="flex-1 min-w-0">
-                      <p className="font-bold text-[#0F172A] text-lg mb-1 truncate">
+                      <p className="font-bold text-[#0F172A] text-lg mb-1.5 truncate">
                         {transaction.description}
                       </p>
-                      <div className="flex flex-wrap items-center gap-2 text-sm text-gray-500">
-                        <span className="font-medium">
+                      <div className="flex flex-wrap items-center gap-2 text-sm">
+                        <span className="font-semibold text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
                           {transaction.type === "transfer"
                             ? `${account?.name} → ${toAccount?.name}`
                             : account?.name}
                         </span>
                         {transaction.type === "expense" && category && (
-                          <>
-                            <span className="text-gray-300">•</span>
-                            <span
-                              className="px-2 py-0.5 rounded-lg text-xs font-semibold"
-                              style={{
-                                backgroundColor: `${category.color || "#6B7280"}20`,
-                                color: category.color || "#6B7280",
-                              }}
-                            >
-                              {category.name}
-                            </span>
-                          </>
+                          <span
+                            className="px-3 py-1 rounded-full text-xs font-bold shadow-sm"
+                            style={{
+                              backgroundColor: `${category.color || "#6B7280"}`,
+                              color: "#FFFFFF",
+                            }}
+                          >
+                            {category.name}
+                          </span>
                         )}
-                        <span className="text-gray-300">•</span>
-                        <span className="flex items-center gap-1">
+                        <span className="flex items-center gap-1.5 text-gray-500 bg-gray-50 px-3 py-1 rounded-full">
                           <CalendarIcon className="w-4 h-4" />
                           {transaction.date.toDate().toLocaleDateString("en-US", {
                             month: "short",
@@ -451,30 +481,48 @@ export default function AllTransactionsPage() {
                           })}
                         </span>
                         {transaction.isRecurring && (
-                          <>
-                            <span className="text-gray-300">•</span>
-                            <span className="px-2 py-0.5 bg-purple-100 text-purple-700 rounded-lg text-xs font-semibold">
-                              Recurring
-                            </span>
-                          </>
+                          <span className="px-3 py-1 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-full text-xs font-bold shadow-md">
+                            🔄 Recurring
+                          </span>
+                        )}
+                        {transaction.type.startsWith("partition") && (
+                          <span className="px-3 py-1 bg-gradient-to-r from-purple-100 to-pink-100 text-purple-700 rounded-full text-xs font-bold">
+                            📊 Partition
+                          </span>
                         )}
                       </div>
                     </div>
 
-                    {/* Amount */}
-                    <div className="text-right flex-shrink-0">
-                      <p
-                        className={`text-2xl font-black ${
-                          transaction.type === "income"
-                            ? "text-green-600"
-                            : transaction.type === "expense"
-                            ? "text-red-600"
-                            : "text-blue-600"
-                        }`}
+                    {/* Amount and Actions */}
+                    <div className="flex items-center gap-4 flex-shrink-0">
+                      <div className="text-right">
+                        <p
+                          className={`text-2xl font-black ${
+                            transaction.type === "income"
+                              ? "text-green-600"
+                              : transaction.type === "expense"
+                              ? "text-red-600"
+                              : transaction.type.startsWith("partition")
+                              ? "text-purple-600"
+                              : "text-blue-600"
+                          }`}
+                        >
+                          {transaction.type === "expense" ? "-" : transaction.type === "income" ? "+" : ""}
+                          €{transaction.amount.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                        </p>
+                      </div>
+                      
+                      {/* Delete Button */}
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleDeleteTransaction(transaction.id);
+                        }}
+                        className="opacity-0 group-hover:opacity-100 transition-opacity p-3 text-red-600 hover:bg-red-50 rounded-xl hover:shadow-md"
+                        title="Delete transaction"
                       >
-                        {transaction.type === "expense" ? "-" : transaction.type === "income" ? "+" : ""}
-                        €{transaction.amount.toLocaleString("en-US", { minimumFractionDigits: 2 })}
-                      </p>
+                        <TrashIcon className="w-5 h-5" />
+                      </button>
                     </div>
                   </div>
                 );
