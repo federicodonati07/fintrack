@@ -23,17 +23,24 @@ import {
   TrashIcon,
 } from "@heroicons/react/24/outline";
 import { useToast } from "@/hooks/useToast";
+import { useCurrency } from "@/contexts/CurrencyContext";
 
 export default function AllTransactionsPage() {
   const router = useRouter();
   const { showToast } = useToast();
+  const { formatAmount, currency } = useCurrency();
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [allTransactions, setAllTransactions] = useState<any[]>([]);
   const [filteredTransactions, setFilteredTransactions] = useState<any[]>([]);
+  const [displayedTransactions, setDisplayedTransactions] = useState<any[]>([]);
   const [showFilters, setShowFilters] = useState(false);
+  const [selectedTransaction, setSelectedTransaction] = useState<any | null>(null);
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [page, setPage] = useState(1);
+  const ITEMS_PER_PAGE = 10;
 
   // Filter states
   const [filters, setFilters] = useState({
@@ -133,7 +140,21 @@ export default function AllTransactionsPage() {
     }
 
     setFilteredTransactions(filtered);
+    setPage(1); // Reset to first page when filters change
   }, [filters, allTransactions]);
+
+  // Update displayed transactions when page or filtered transactions change
+  useEffect(() => {
+    const startIndex = 0;
+    const endIndex = page * ITEMS_PER_PAGE;
+    setDisplayedTransactions(filteredTransactions.slice(startIndex, endIndex));
+  }, [page, filteredTransactions]);
+
+  const loadMore = () => {
+    setPage((prev) => prev + 1);
+  };
+
+  const hasMore = displayedTransactions.length < filteredTransactions.length;
 
   const clearFilters = () => {
     setFilters({
@@ -166,11 +187,27 @@ export default function AllTransactionsPage() {
       const userAccounts = await getAccounts(user.uid);
       setAccounts(userAccounts);
       
+      // Close detail modal if it's open
+      if (showDetailModal) {
+        setShowDetailModal(false);
+        setSelectedTransaction(null);
+      }
+      
       showToast("✅ Transaction deleted successfully!", "success");
     } catch (error: any) {
       console.error("Error deleting transaction:", error);
       showToast(`❌ ${error.message || "Error deleting transaction"}`, "error");
     }
+  };
+
+  const openDetailModal = (transaction: any) => {
+    setSelectedTransaction(transaction);
+    setShowDetailModal(true);
+  };
+
+  const closeDetailModal = () => {
+    setShowDetailModal(false);
+    setSelectedTransaction(null);
   };
 
   const activeFiltersCount = 
@@ -304,7 +341,7 @@ export default function AllTransactionsPage() {
                 </label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">
-                    €
+                    {currency.symbol}
                   </span>
                   <input
                     type="number"
@@ -324,7 +361,7 @@ export default function AllTransactionsPage() {
                 </label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">
-                    €
+                    {currency.symbol}
                   </span>
                   <input
                     type="number"
@@ -398,7 +435,7 @@ export default function AllTransactionsPage() {
           <div className="bg-gradient-to-br from-blue-50 to-cyan-50 rounded-2xl p-5 shadow-lg border border-blue-100">
             <p className="text-sm text-blue-700 font-semibold mb-1">Transfers</p>
             <p className="text-3xl font-black text-blue-600">
-              {filteredTransactions.filter((t) => t.type === "transfer").length}
+              {filteredTransactions.filter((t) => t.type === "transfer" || t.type?.startsWith("partition")).length}
             </p>
           </div>
         </div>
@@ -411,15 +448,15 @@ export default function AllTransactionsPage() {
             </h2>
           </div>
 
-          <div className="divide-y divide-gray-100">
-            {filteredTransactions.length === 0 ? (
+          <div className="max-h-[600px] overflow-y-auto divide-y divide-gray-100">
+            {displayedTransactions.length === 0 ? (
               <div className="text-center py-16">
                 <MagnifyingGlassIcon className="w-16 h-16 text-gray-300 mx-auto mb-4" />
                 <p className="text-gray-500 font-semibold mb-2">No transactions found</p>
                 <p className="text-gray-400 text-sm">Try adjusting your filters</p>
               </div>
             ) : (
-              filteredTransactions.map((transaction) => {
+              displayedTransactions.map((transaction) => {
                 const account = accounts.find((a) => a.id === transaction.accountId);
                 const toAccount = accounts.find((a) => a.id === transaction.toAccountId);
                 const category = categories.find((c) => c.name === transaction.category);
@@ -427,7 +464,8 @@ export default function AllTransactionsPage() {
                 return (
                   <div
                     key={transaction.id}
-                    className="group flex items-center gap-4 p-5 hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-b-0"
+                    onClick={() => openDetailModal(transaction)}
+                    className="group flex items-center gap-4 p-5 hover:bg-gray-50 transition-colors cursor-pointer"
                   >
                     {/* Icon */}
                     <div
@@ -435,20 +473,16 @@ export default function AllTransactionsPage() {
                         transaction.type === "income"
                           ? "bg-[#22C55E]/10"
                           : transaction.type === "expense"
-                          ? "bg-gray-100"
-                          : transaction.type.startsWith("partition")
-                          ? "bg-[#1E293B]/10"
-                          : "bg-gray-100"
+                          ? "bg-red-500/10"
+                          : "bg-blue-500/10"
                       }`}
                     >
                       {transaction.type === "income" ? (
                         <ArrowUpIcon className="w-6 h-6 text-[#22C55E]" />
                       ) : transaction.type === "expense" ? (
-                        <ArrowDownIcon className="w-6 h-6 text-[#0F172A]" />
-                      ) : transaction.type.startsWith("partition") ? (
-                        <span className="text-xl">📊</span>
+                        <ArrowDownIcon className="w-6 h-6 text-red-600" />
                       ) : (
-                        <ArrowsRightLeftIcon className="w-6 h-6 text-[#0F172A]" />
+                        <ArrowsRightLeftIcon className="w-6 h-6 text-blue-600" />
                       )}
                     </div>
 
@@ -458,11 +492,35 @@ export default function AllTransactionsPage() {
                         {transaction.description}
                       </p>
                       <div className="flex flex-wrap items-center gap-2 text-sm">
-                        <span className="font-medium text-gray-600 bg-white px-2.5 py-1 rounded border border-gray-200 text-xs">
-                          {transaction.type === "transfer"
-                            ? `${account?.name} → ${toAccount?.name}`
-                            : account?.name}
-                        </span>
+                        {transaction.type === "transfer" ? (
+                          <>
+                            <span 
+                              className="font-medium text-white px-2.5 py-1 rounded text-xs"
+                              style={{ backgroundColor: account?.color || "#6B7280" }}
+                            >
+                              {account?.name}
+                            </span>
+                            <ArrowsRightLeftIcon className="w-3 h-3 text-gray-400" />
+                            <span 
+                              className="font-medium text-white px-2.5 py-1 rounded text-xs"
+                              style={{ backgroundColor: toAccount?.color || "#6B7280" }}
+                            >
+                              {toAccount?.name}
+                            </span>
+                          </>
+                        ) : (
+                          <span 
+                            className="font-medium text-white px-2.5 py-1 rounded text-xs"
+                            style={{ backgroundColor: account?.color || "#6B7280" }}
+                          >
+                            {account?.name}
+                          </span>
+                        )}
+                        {transaction.type === "income" && transaction.category && (
+                          <span className="px-2.5 py-1 rounded text-xs font-medium bg-[#22C55E] text-white">
+                            {transaction.category.replace(/_/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase())}
+                          </span>
+                        )}
                         {transaction.type === "expense" && category && (
                           <span
                             className="px-2.5 py-1 rounded text-xs font-medium text-white"
@@ -491,11 +549,13 @@ export default function AllTransactionsPage() {
                           className={`text-lg font-semibold ${
                             transaction.type === "income"
                               ? "text-[#22C55E]"
-                              : "text-[#0F172A]"
+                              : transaction.type === "expense"
+                              ? "text-red-600"
+                              : "text-blue-600"
                           }`}
                         >
                           {transaction.type === "expense" ? "-" : transaction.type === "income" ? "+" : ""}
-                          €{transaction.amount.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                          {formatAmount(transaction.amount)}
                         </p>
                       </div>
                       
@@ -505,7 +565,7 @@ export default function AllTransactionsPage() {
                           e.stopPropagation();
                           handleDeleteTransaction(transaction.id);
                         }}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity p-2 text-[#0F172A] hover:bg-gray-100 rounded-lg"
+                        className="opacity-0 group-hover:opacity-100 p-2 hover:bg-red-50 text-red-600 rounded-lg transition-all"
                         title="Delete transaction"
                       >
                         <TrashIcon className="w-5 h-5" />
@@ -516,7 +576,216 @@ export default function AllTransactionsPage() {
               })
             )}
           </div>
+
+          {/* Load More Button */}
+          {displayedTransactions.length < filteredTransactions.length && (
+            <div className="p-6 border-t border-gray-100 text-center">
+              <button
+                onClick={loadMore}
+                className="px-6 py-3 bg-[#0F172A] hover:bg-[#1E293B] text-white rounded-xl font-semibold transition-colors"
+              >
+                Load More ({filteredTransactions.length - displayedTransactions.length} remaining)
+              </button>
+            </div>
+          )}
         </div>
+
+        {/* Transaction Detail Modal */}
+        {showDetailModal && selectedTransaction && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+              {/* Modal Header */}
+              <div
+                className={`p-6 border-b border-gray-200 ${
+                  selectedTransaction.type === "income"
+                    ? "bg-[#22C55E]/5"
+                    : selectedTransaction.type === "expense"
+                    ? "bg-red-500/5"
+                    : "bg-blue-500/5"
+                }`}
+              >
+                <div className="flex items-center justify-between">
+                  <h2
+                    className={`text-2xl font-bold ${
+                      selectedTransaction.type === "income"
+                        ? "text-[#22C55E]"
+                        : selectedTransaction.type === "expense"
+                        ? "text-red-600"
+                        : "text-blue-600"
+                    }`}
+                  >
+                    Transaction Details
+                  </h2>
+                  <button
+                    onClick={closeDetailModal}
+                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                  >
+                    <XMarkIcon className="w-6 h-6 text-gray-500" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Modal Content */}
+              <div className="p-8 space-y-6">
+                {/* Amount */}
+                <div className="text-center p-6 bg-gray-50 rounded-2xl">
+                  <p className="text-sm text-gray-500 font-semibold mb-2 uppercase tracking-wider">Amount</p>
+                  <p
+                    className={`text-5xl font-black ${
+                      selectedTransaction.type === "income"
+                        ? "text-[#22C55E]"
+                        : selectedTransaction.type === "expense"
+                        ? "text-red-600"
+                        : "text-blue-600"
+                    }`}
+                  >
+                    {selectedTransaction.type === "expense" ? "-" : selectedTransaction.type === "income" ? "+" : ""}
+                    {currency.symbol}{selectedTransaction.amount.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                  </p>
+                </div>
+
+                {/* Description */}
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Description</p>
+                  <p className="text-lg font-semibold text-[#0F172A]">{selectedTransaction.description}</p>
+                </div>
+
+                {/* Type */}
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Type</p>
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`p-2 rounded-lg ${
+                        selectedTransaction.type === "income"
+                          ? "bg-[#22C55E]/10"
+                          : selectedTransaction.type === "expense"
+                          ? "bg-red-500/10"
+                          : "bg-blue-500/10"
+                      }`}
+                    >
+                      {selectedTransaction.type === "income" ? (
+                        <ArrowUpIcon className="w-5 h-5 text-[#22C55E]" />
+                      ) : selectedTransaction.type === "expense" ? (
+                        <ArrowDownIcon className="w-5 h-5 text-red-600" />
+                      ) : (
+                        <ArrowsRightLeftIcon className="w-5 h-5 text-blue-600" />
+                      )}
+                    </div>
+                    <span className="font-semibold text-[#0F172A] capitalize">{selectedTransaction.type}</span>
+                  </div>
+                </div>
+
+                {/* Date */}
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Date</p>
+                  <p className="font-semibold text-[#0F172A] flex items-center gap-2">
+                    <CalendarIcon className="w-5 h-5 text-gray-400" />
+                    {selectedTransaction.date.toDate().toLocaleDateString("en-US", {
+                      month: "long",
+                      day: "numeric",
+                      year: "numeric",
+                    })}
+                  </p>
+                </div>
+
+                {/* Account(s) */}
+                <div>
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+                    {selectedTransaction.type === "transfer" ? "From / To Accounts" : "Account"}
+                  </p>
+                  {selectedTransaction.type === "transfer" ? (
+                    <div className="flex items-center gap-3">
+                      <span
+                        className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+                        style={{
+                          backgroundColor: accounts.find((a) => a.id === selectedTransaction.accountId)?.color || "#6B7280",
+                        }}
+                      >
+                        {accounts.find((a) => a.id === selectedTransaction.accountId)?.name}
+                      </span>
+                      <ArrowsRightLeftIcon className="w-5 h-5 text-gray-400" />
+                      <span
+                        className="px-4 py-2 rounded-lg text-sm font-semibold text-white"
+                        style={{
+                          backgroundColor: accounts.find((a) => a.id === selectedTransaction.toAccountId)?.color || "#6B7280",
+                        }}
+                      >
+                        {accounts.find((a) => a.id === selectedTransaction.toAccountId)?.name}
+                      </span>
+                    </div>
+                  ) : (
+                    <span
+                      className="inline-block px-4 py-2 rounded-lg text-sm font-semibold text-white"
+                      style={{
+                        backgroundColor: accounts.find((a) => a.id === selectedTransaction.accountId)?.color || "#6B7280",
+                      }}
+                    >
+                      {accounts.find((a) => a.id === selectedTransaction.accountId)?.name}
+                    </span>
+                  )}
+                </div>
+
+                {/* Category (if expense or income) */}
+                {selectedTransaction.category && (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Category</p>
+                    {selectedTransaction.type === "income" ? (
+                      <span className="inline-block px-4 py-2 rounded-lg text-sm font-semibold bg-[#22C55E] text-white">
+                        {selectedTransaction.category.replace(/_/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase())}
+                      </span>
+                    ) : (
+                      <span
+                        className="inline-block px-4 py-2 rounded-lg text-sm font-semibold text-white"
+                        style={{
+                          backgroundColor: categories.find((c) => c.name === selectedTransaction.category)?.color || "#6B7280",
+                        }}
+                      >
+                        {selectedTransaction.category}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* Recurring Status */}
+                {selectedTransaction.isRecurring && (
+                  <div>
+                    <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Recurring</p>
+                    <div className="flex items-center gap-2 text-sm">
+                      <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-lg font-semibold">
+                        {selectedTransaction.recurringInterval?.toUpperCase()}
+                      </span>
+                      {selectedTransaction.endDate && (
+                        <span className="text-gray-600">
+                          Until {selectedTransaction.endDate.toDate().toLocaleDateString("en-US")}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Modal Footer */}
+              <div className="border-t border-gray-200 px-8 py-6 flex justify-between items-center bg-gray-50">
+                <button
+                  onClick={() => {
+                    closeDetailModal();
+                    handleDeleteTransaction(selectedTransaction.id);
+                  }}
+                  className="px-6 py-3 bg-red-500 hover:bg-red-600 text-white rounded-xl font-semibold transition-colors flex items-center gap-2"
+                >
+                  <TrashIcon className="w-5 h-5" />
+                  Delete Transaction
+                </button>
+                <button
+                  onClick={closeDetailModal}
+                  className="px-6 py-3 bg-[#0F172A] hover:bg-[#1E293B] text-white rounded-xl font-semibold transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

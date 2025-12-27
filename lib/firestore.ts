@@ -198,6 +198,20 @@ export async function updateUserPlan(opts: {
 }
 
 /**
+ * Update user currency preference
+ */
+export async function updateUserCurrency(
+  userId: string,
+  currency: string
+): Promise<void> {
+  const userRef = doc(db, "users", userId);
+  await updateDoc(userRef, {
+    currency,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
  * Delete user account completely (Auth + Firestore data)
  * Requires password for re-authentication
  */
@@ -223,11 +237,47 @@ export async function deleteUserAccount(
     );
     await reauthenticateWithCredential(firebaseUser, credential);
 
+    // Get user document to check for active subscription
+    const userRef = doc(db, "users", userId);
+    const userSnap = await getDoc(userRef);
+    
+    if (userSnap.exists()) {
+      const userData = userSnap.data();
+      const stripeSubscriptionId = userData?.stripeSubscriptionId;
+      
+      // Cancel Stripe subscription if exists
+      if (stripeSubscriptionId) {
+        try {
+          const response = await fetch('/api/stripe/cancel-subscription', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              userId,
+              subscriptionId: stripeSubscriptionId,
+              immediate: true, // Cancel immediately for account deletion
+            }),
+          });
+
+          if (!response.ok) {
+            console.error('Failed to cancel Stripe subscription:', await response.text());
+            // Continue with account deletion even if subscription cancellation fails
+          } else {
+            const result = await response.json();
+            console.log('✅ Stripe subscription cancelled successfully:', result.message);
+          }
+        } catch (error) {
+          console.error('Error cancelling Stripe subscription:', error);
+          // Continue with account deletion even if subscription cancellation fails
+        }
+      }
+    }
+
     // Delete all user subcollections and documents
     await deleteAllUserData(userId);
 
     // Delete user document
-    const userRef = doc(db, "users", userId);
     await deleteDoc(userRef);
 
     // Delete user from Firebase Authentication
@@ -645,11 +695,55 @@ export async function getAccounts(userId: string) {
     accounts.push({ id: doc.id, ...doc.data() });
   });
   
+  // Sort by custom order if available, otherwise by creation date
   return accounts.sort((a, b) => {
+    if (a.order !== undefined && b.order !== undefined) {
+      return a.order - b.order;
+    }
     const dateA = a.createdAt?.toDate?.()?.getTime() || 0;
     const dateB = b.createdAt?.toDate?.()?.getTime() || 0;
     return dateB - dateA;
   });
+}
+
+/**
+ * Update account order for drag-and-drop
+ */
+export async function updateAccountsOrder(
+  userId: string,
+  accountIds: string[]
+): Promise<void> {
+  const batch = writeBatch(db);
+
+  accountIds.forEach((accountId, index) => {
+    const accountRef = doc(db, "users", userId, "accounts", accountId);
+    batch.update(accountRef, { order: index });
+  });
+
+  await batch.commit();
+}
+
+/**
+ * Save user's analytics dashboard configuration
+ */
+export async function saveAnalyticsConfig(
+  userId: string,
+  config: { visibleCharts: string[]; chartOrder: string[] }
+): Promise<void> {
+  const configRef = doc(db, "users", userId, "settings", "analytics");
+  await setDoc(configRef, {
+    ...config,
+    updatedAt: serverTimestamp(),
+  });
+}
+
+/**
+ * Get user's analytics dashboard configuration
+ */
+export async function getAnalyticsConfig(userId: string): Promise<any> {
+  const configRef = doc(db, "users", userId, "settings", "analytics");
+  const configSnap = await getDoc(configRef);
+  return configSnap.exists() ? configSnap.data() : null;
 }
 
 /**

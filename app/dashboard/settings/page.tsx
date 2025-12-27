@@ -4,8 +4,8 @@ import { useEffect, useState, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged, updatePassword, User } from "firebase/auth";
 import { auth } from "@/lib/firebase";
-import { deleteUserAccount } from "@/lib/firestore";
-import { Dialog, Transition } from "@headlessui/react";
+import { deleteUserAccount, getUserDocument, updateUserCurrency } from "@/lib/firestore";
+import { Dialog, Transition, Listbox } from "@headlessui/react";
 import {
   ArrowLeftIcon,
   KeyIcon,
@@ -13,12 +13,23 @@ import {
   ExclamationTriangleIcon,
   CheckCircleIcon,
   UserCircleIcon,
+  CurrencyDollarIcon,
+  CheckIcon,
+  ChevronUpDownIcon,
 } from "@heroicons/react/24/outline";
+import { CURRENCIES, getCurrencyByCode } from "@/lib/currencies";
+import { useCurrency } from "@/contexts/CurrencyContext";
 
 export default function SettingsPage() {
   const router = useRouter();
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
+  const { setCurrencyCode } = useCurrency();
+
+  // Currency state
+  const [selectedCurrency, setSelectedCurrency] = useState("EUR");
+  const [isUpdatingCurrency, setIsUpdatingCurrency] = useState(false);
+  const [currencySuccess, setCurrencySuccess] = useState("");
 
   // Password change state
   const [currentPassword, setCurrentPassword] = useState("");
@@ -35,17 +46,48 @@ export default function SettingsPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (currentUser) => {
+    const unsubscribe = onAuthStateChanged(auth, async (currentUser) => {
       if (!currentUser) {
         router.push("/auth");
         return;
       }
       setUser(currentUser);
+      
+      // Load user's current currency
+      try {
+        const userDoc = await getUserDocument(currentUser.uid);
+        if (userDoc?.currency) {
+          setSelectedCurrency(userDoc.currency);
+        }
+      } catch (error) {
+        console.error("Error loading user data:", error);
+      }
+      
       setLoading(false);
     });
 
     return () => unsubscribe();
   }, [router]);
+
+  const handleCurrencyChange = async (newCurrency: string) => {
+    if (!user) return;
+
+    setIsUpdatingCurrency(true);
+    setCurrencySuccess("");
+
+    try {
+      await updateUserCurrency(user.uid, newCurrency);
+      setSelectedCurrency(newCurrency);
+      setCurrencyCode(newCurrency); // Update context
+      setCurrencySuccess("Currency updated successfully!");
+      
+      setTimeout(() => setCurrencySuccess(""), 3000);
+    } catch (error) {
+      console.error("Error updating currency:", error);
+    } finally {
+      setIsUpdatingCurrency(false);
+    }
+  };
 
   const handlePasswordChange = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -205,6 +247,91 @@ export default function SettingsPage() {
                   </p>
                 </div>
               </div>
+            </div>
+          </div>
+
+          {/* Currency Section */}
+          <div className="bg-white rounded-2xl border border-gray-200 p-8">
+            <div className="flex items-center gap-3 mb-6">
+              <div className="w-10 h-10 rounded-xl bg-blue-100 flex items-center justify-center">
+                <CurrencyDollarIcon className="w-5 h-5 text-blue-600" />
+              </div>
+              <div>
+                <h2 className="text-lg font-semibold text-[#0F172A]">Currency</h2>
+                <p className="text-sm text-gray-500">Select your preferred currency for display</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Preferred Currency
+                </label>
+                <Listbox value={selectedCurrency} onChange={handleCurrencyChange} disabled={isUpdatingCurrency}>
+                  <div className="relative">
+                    <Listbox.Button className="relative w-full cursor-pointer rounded-xl border border-gray-200 bg-white py-3 pl-4 pr-10 text-left shadow-sm focus:outline-none focus:ring-2 focus:ring-[#22C55E] focus:border-transparent">
+                      <span className="flex items-center gap-2">
+                        <span className="text-xl">{getCurrencyByCode(selectedCurrency)?.flag}</span>
+                        <span className="block truncate font-medium text-gray-900">
+                          {selectedCurrency} - {getCurrencyByCode(selectedCurrency)?.name}
+                        </span>
+                        <span className="text-gray-500">
+                          ({getCurrencyByCode(selectedCurrency)?.symbol})
+                        </span>
+                      </span>
+                      <span className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
+                        <ChevronUpDownIcon className="h-5 w-5 text-gray-400" aria-hidden="true" />
+                      </span>
+                    </Listbox.Button>
+                    <Transition
+                      as={Fragment}
+                      leave="transition ease-in duration-100"
+                      leaveFrom="opacity-100"
+                      leaveTo="opacity-0"
+                    >
+                      <Listbox.Options className="absolute z-10 mt-2 max-h-80 w-full overflow-auto rounded-xl bg-white py-2 text-base shadow-lg ring-1 ring-black ring-opacity-5 focus:outline-none">
+                        {CURRENCIES.map((currency) => (
+                          <Listbox.Option
+                            key={currency.code}
+                            className={({ active }) =>
+                              `relative cursor-pointer select-none py-3 pl-4 pr-10 ${
+                                active ? 'bg-[#22C55E]/10 text-[#0F172A]' : 'text-gray-900'
+                              }`
+                            }
+                            value={currency.code}
+                          >
+                            {({ selected, active }) => (
+                              <>
+                                <div className="flex items-center gap-2">
+                                  <span className="text-xl">{currency.flag}</span>
+                                  <span className={`block truncate ${selected ? 'font-semibold' : 'font-normal'}`}>
+                                    {currency.code} - {currency.name}
+                                  </span>
+                                  <span className="text-gray-500">
+                                    ({currency.symbol})
+                                  </span>
+                                </div>
+                                {selected ? (
+                                  <span className="absolute inset-y-0 right-0 flex items-center pr-3 text-[#22C55E]">
+                                    <CheckIcon className="h-5 w-5" aria-hidden="true" />
+                                  </span>
+                                ) : null}
+                              </>
+                            )}
+                          </Listbox.Option>
+                        ))}
+                      </Listbox.Options>
+                    </Transition>
+                  </div>
+                </Listbox>
+              </div>
+
+              {currencySuccess && (
+                <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-xl">
+                  <CheckCircleIcon className="w-5 h-5 text-green-600" />
+                  <p className="text-sm text-green-800">{currencySuccess}</p>
+                </div>
+              )}
             </div>
           </div>
 

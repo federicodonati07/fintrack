@@ -28,6 +28,7 @@ import {
   TrashIcon,
 } from "@heroicons/react/24/outline";
 import { useToast } from "@/hooks/useToast";
+import { useCurrency } from "@/contexts/CurrencyContext";
 
 const INCOME_CATEGORIES = [
   { value: "salary", label: "Salary", icon: "💼", color: "#10B981" },
@@ -46,6 +47,7 @@ const RECURRING_INTERVALS = [
 export default function TransactionsPage() {
   const router = useRouter();
   const { showToast } = useToast();
+  const { formatAmount, currency } = useCurrency();
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -53,6 +55,8 @@ export default function TransactionsPage() {
   const [recentTransactions, setRecentTransactions] = useState<any[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [transactionType, setTransactionType] = useState<"income" | "expense" | "transfer">("income");
+  const [showDetailModal, setShowDetailModal] = useState(false);
+  const [selectedTransaction, setSelectedTransaction] = useState<any | null>(null);
 
   const [formData, setFormData] = useState({
     amount: 0,
@@ -135,6 +139,10 @@ export default function TransactionsPage() {
       showToast("❌ Please select a category", "error");
       return;
     }
+    if (transactionType === "income" && !formData.incomeCategory) {
+      showToast("❌ Please select an income category", "error");
+      return;
+    }
     if (!formData.description.trim()) {
       showToast("❌ Please add a description", "error");
       return;
@@ -146,7 +154,7 @@ export default function TransactionsPage() {
         amount: formData.amount,
         accountId: formData.accountId,
         toAccountId: transactionType === "transfer" ? formData.toAccountId : undefined,
-        category: transactionType === "expense" ? formData.category : undefined,
+        category: transactionType === "expense" ? formData.category : transactionType === "income" ? formData.incomeCategory : undefined,
         incomeCategory: transactionType === "income" ? formData.incomeCategory as any : undefined,
         description: formData.description,
         date: new Date(formData.date),
@@ -178,6 +186,16 @@ export default function TransactionsPage() {
   const closeForm = () => {
     setShowForm(false);
     resetForm();
+  };
+
+  const openTransactionDetail = (transaction: any) => {
+    setSelectedTransaction(transaction);
+    setShowDetailModal(true);
+  };
+
+  const closeTransactionDetail = () => {
+    setShowDetailModal(false);
+    setSelectedTransaction(null);
   };
 
   const handleDeleteTransaction = async (transactionId: string) => {
@@ -249,11 +267,11 @@ export default function TransactionsPage() {
           {/* Expense Card */}
           <button
             onClick={() => openForm("expense")}
-            className="group relative bg-white border-2 border-gray-200 hover:border-[#0F172A] rounded-lg p-6 text-left hover:shadow-md transition-all duration-200"
+            className="group relative bg-white border-2 border-gray-200 hover:border-red-600 rounded-lg p-6 text-left hover:shadow-md transition-all duration-200"
           >
             <div className="flex items-start gap-4">
-              <div className="p-3 bg-gray-100 rounded-lg group-hover:bg-gray-200 transition-colors">
-                <ArrowDownIcon className="w-6 h-6 text-[#0F172A]" />
+              <div className="p-3 bg-red-500/10 rounded-lg group-hover:bg-red-500/20 transition-colors">
+                <ArrowDownIcon className="w-6 h-6 text-red-600" />
               </div>
               <div>
                 <h3 className="text-lg font-semibold text-[#0F172A] mb-1">Add Expense</h3>
@@ -265,11 +283,11 @@ export default function TransactionsPage() {
           {/* Transfer Card */}
           <button
             onClick={() => openForm("transfer")}
-            className="group relative bg-white border-2 border-gray-200 hover:border-gray-400 rounded-lg p-6 text-left hover:shadow-md transition-all duration-200"
+            className="group relative bg-white border-2 border-gray-200 hover:border-blue-600 rounded-lg p-6 text-left hover:shadow-md transition-all duration-200"
           >
             <div className="flex items-start gap-4">
-              <div className="p-3 bg-gray-100 rounded-lg group-hover:bg-gray-200 transition-colors">
-                <ArrowsRightLeftIcon className="w-6 h-6 text-[#0F172A]" />
+              <div className="p-3 bg-blue-500/10 rounded-lg group-hover:bg-blue-500/20 transition-colors">
+                <ArrowsRightLeftIcon className="w-6 h-6 text-blue-600" />
               </div>
               <div>
                 <h3 className="text-lg font-semibold text-[#0F172A] mb-1">Transfer Funds</h3>
@@ -314,37 +332,44 @@ export default function TransactionsPage() {
                       return (
                         <div
                           key={transaction.id}
-                          className="group flex items-center gap-4 p-4 bg-gray-50 rounded-lg border border-gray-100 hover:border-gray-200 hover:shadow-sm transition-all duration-200"
+                          onClick={() => openTransactionDetail(transaction)}
+                          className="group flex items-center gap-4 p-4 bg-gray-50 rounded-lg border border-gray-100 hover:border-gray-200 hover:shadow-sm transition-all duration-200 cursor-pointer"
                         >
                           <div
                             className={`w-12 h-12 rounded-lg flex items-center justify-center ${
                               transaction.type === "income"
                                 ? "bg-[#22C55E]/10"
                                 : transaction.type === "expense"
-                                ? "bg-gray-100"
-                                : transaction.type.startsWith("partition")
-                                ? "bg-[#1E293B]/10"
-                                : "bg-gray-100"
+                                ? "bg-red-500/10"
+                                : "bg-blue-500/10"
                             }`}
                           >
                             {transaction.type === "income" ? (
                               <ArrowUpIcon className="w-6 h-6 text-[#22C55E]" />
                             ) : transaction.type === "expense" ? (
-                              <ArrowDownIcon className="w-6 h-6 text-[#0F172A]" />
-                            ) : transaction.type.startsWith("partition") ? (
-                              <span className="text-lg">📊</span>
+                              <ArrowDownIcon className="w-6 h-6 text-red-600" />
                             ) : (
-                              <ArrowsRightLeftIcon className="w-6 h-6 text-[#0F172A]" />
+                              <ArrowsRightLeftIcon className="w-6 h-6 text-blue-600" />
                             )}
                           </div>
                           <div className="flex-1 min-w-0">
                             <p className="font-medium text-[#0F172A] truncate text-sm mb-1">{transaction.description}</p>
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-xs font-medium text-gray-600 bg-white px-2 py-0.5 rounded border border-gray-200">
+                              <span 
+                                className="text-xs font-medium text-white px-2 py-0.5 rounded"
+                                style={{ backgroundColor: account?.color || "#6B7280" }}
+                              >
                                 {transaction.type === "transfer"
                                   ? `${account?.name} → ${toAccount?.name}`
                                   : account?.name}
                               </span>
+                              {transaction.type === "income" && transaction.category && (
+                                <span
+                                  className="text-xs font-medium px-2 py-0.5 rounded bg-[#22C55E] text-white"
+                                >
+                                  {transaction.category.replace(/_/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase())}
+                                </span>
+                              )}
                               {transaction.type === "expense" && category && (
                                 <span
                                   className="text-xs font-medium px-2 py-0.5 rounded text-white"
@@ -366,10 +391,12 @@ export default function TransactionsPage() {
                               className={`font-semibold text-base ${
                                 transaction.type === "income"
                                   ? "text-[#22C55E]"
-                                  : "text-[#0F172A]"
+                                  : transaction.type === "expense"
+                                  ? "text-red-600"
+                                  : "text-blue-600"
                               }`}
                             >
-                              {transaction.type === "expense" ? "-" : transaction.type === "income" ? "+" : ""}€
+                              {transaction.type === "expense" ? "-" : transaction.type === "income" ? "+" : ""}{currency.symbol}
                               {transaction.amount.toLocaleString("en-US", { minimumFractionDigits: 2 })}
                             </p>
                             <button
@@ -394,16 +421,24 @@ export default function TransactionsPage() {
             <>
               {/* Transaction Form Header */}
               <div
-                className={`p-6 ${
+                className={`p-6 border-b border-gray-200 ${
                   transactionType === "income"
-                    ? "bg-gradient-to-r from-green-500 to-emerald-600"
+                    ? "bg-[#22C55E]/5"
                     : transactionType === "expense"
-                    ? "bg-gradient-to-r from-red-500 to-rose-600"
-                    : "bg-gradient-to-r from-blue-500 to-cyan-600"
+                    ? "bg-red-500/5"
+                    : "bg-blue-500/5"
                 }`}
               >
                 <div className="flex items-center justify-between">
-                  <h2 className="text-2xl font-bold text-white">
+                  <h2
+                    className={`text-xl font-semibold ${
+                      transactionType === "income"
+                        ? "text-[#22C55E]"
+                        : transactionType === "expense"
+                        ? "text-red-600"
+                        : "text-blue-600"
+                    }`}
+                  >
                     {transactionType === "income"
                       ? "Add Income"
                       : transactionType === "expense"
@@ -412,9 +447,9 @@ export default function TransactionsPage() {
                   </h2>
                   <button
                     onClick={closeForm}
-                    className="p-2 hover:bg-white/20 rounded-lg transition-colors"
+                    className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
                   >
-                    <XMarkIcon className="w-6 h-6 text-white" />
+                    <XMarkIcon className="w-6 h-6 text-gray-500" />
                   </button>
                 </div>
               </div>
@@ -428,13 +463,14 @@ export default function TransactionsPage() {
                   </label>
                   <div className="relative">
                     <span className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-500 font-bold text-lg">
-                      €
+                      {currency.symbol}
                     </span>
                     <input
                       type="number"
                       step="0.01"
                       value={formData.amount || ""}
                       onChange={(e) => setFormData({ ...formData, amount: parseFloat(e.target.value) || 0 })}
+                      onWheel={(e) => e.currentTarget.blur()}
                       placeholder="0.00"
                       className="w-full pl-10 pr-4 py-4 bg-gray-50 border-2 border-gray-200 rounded-xl text-[#0F172A] text-2xl font-bold placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all"
                     />
@@ -454,7 +490,7 @@ export default function TransactionsPage() {
                     <option value="">Select account...</option>
                     {activeAccounts.map((account) => (
                       <option key={account.id} value={account.id}>
-                        {account.name} (€{account.currentBalance.toLocaleString("en-US", { minimumFractionDigits: 2 })})
+                        {account.name} ({formatAmount(account.currentBalance)})
                       </option>
                     ))}
                   </select>
@@ -476,7 +512,7 @@ export default function TransactionsPage() {
                         .filter((a) => a.id !== formData.accountId)
                         .map((account) => (
                           <option key={account.id} value={account.id}>
-                            {account.name} (€{account.currentBalance.toLocaleString("en-US", { minimumFractionDigits: 2 })})
+                            {account.name} ({formatAmount(account.currentBalance)})
                           </option>
                         ))}
                     </select>
@@ -629,18 +665,18 @@ export default function TransactionsPage() {
                 <div className="flex gap-3 pt-4">
                   <button
                     onClick={closeForm}
-                    className="flex-1 px-6 py-3 bg-gray-100 text-gray-700 rounded-xl font-semibold hover:bg-gray-200 transition-colors"
+                    className="flex-1 px-6 py-3 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleCreateTransaction}
-                    className={`flex-1 px-6 py-3 text-white rounded-xl font-semibold hover:shadow-lg transition-all ${
+                    className={`flex-1 px-6 py-3 text-white rounded-lg font-medium transition-colors ${
                       transactionType === "income"
-                        ? "bg-gradient-to-r from-green-500 to-emerald-600"
+                        ? "bg-[#22C55E] hover:bg-[#16A34A]"
                         : transactionType === "expense"
-                        ? "bg-gradient-to-r from-red-500 to-rose-600"
-                        : "bg-gradient-to-r from-blue-500 to-cyan-600"
+                        ? "bg-red-600 hover:bg-red-700"
+                        : "bg-blue-600 hover:bg-blue-700"
                     }`}
                   >
                     {transactionType === "transfer" ? "Transfer" : "Create Transaction"}
@@ -651,6 +687,154 @@ export default function TransactionsPage() {
           )}
         </div>
       </div>
+
+      {/* Transaction Detail Modal */}
+      {showDetailModal && selectedTransaction && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={closeTransactionDetail}>
+          <div className="bg-white rounded-lg max-w-2xl w-full shadow-xl" onClick={(e) => e.stopPropagation()}>
+            {/* Modal Header */}
+            <div className={`p-6 border-b border-gray-200 ${
+              selectedTransaction.type === "income" ? "bg-[#22C55E]/5" :
+              selectedTransaction.type === "expense" ? "bg-red-500/5" : "bg-blue-500/5"
+            }`}>
+              <div className="flex items-center justify-between">
+                <h3 className="text-xl font-semibold text-[#0F172A]">Transaction Details</h3>
+                <button
+                  onClick={closeTransactionDetail}
+                  className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+                >
+                  <XMarkIcon className="w-5 h-5 text-gray-500" />
+                </button>
+              </div>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-6 space-y-6">
+              {/* Amount */}
+              <div className="text-center py-4 bg-gray-50 rounded-lg">
+                <p className="text-sm text-gray-500 mb-1">Amount</p>
+                <p className={`text-4xl font-bold ${
+                  selectedTransaction.type === "income" ? "text-[#22C55E]" :
+                  selectedTransaction.type === "expense" ? "text-red-600" : "text-blue-600"
+                }`}>
+                  {selectedTransaction.type === "expense" ? "-" : selectedTransaction.type === "income" ? "+" : ""}
+                  {formatAmount(selectedTransaction.amount)}
+                </p>
+              </div>
+
+              {/* Details Grid */}
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Type</p>
+                  <div className="flex items-center gap-2">
+                    <div className={`p-2 rounded-lg ${
+                      selectedTransaction.type === "income" ? "bg-[#22C55E]/10" :
+                      selectedTransaction.type === "expense" ? "bg-red-500/10" : "bg-blue-500/10"
+                    }`}>
+                      {selectedTransaction.type === "income" ? (
+                        <ArrowUpIcon className={`w-5 h-5 text-[#22C55E]`} />
+                      ) : selectedTransaction.type === "expense" ? (
+                        <ArrowDownIcon className="w-5 h-5 text-red-600" />
+                      ) : (
+                        <ArrowsRightLeftIcon className="w-5 h-5 text-blue-600" />
+                      )}
+                    </div>
+                    <span className="font-medium text-[#0F172A] capitalize">{selectedTransaction.type}</span>
+                  </div>
+                </div>
+
+                <div>
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Date</p>
+                  <p className="font-medium text-[#0F172A]">
+                    {selectedTransaction.date.toDate().toLocaleDateString("en-US", {
+                      month: "long",
+                      day: "numeric",
+                      year: "numeric"
+                    })}
+                  </p>
+                </div>
+
+                <div className="col-span-2">
+                  <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Description</p>
+                  <p className="font-medium text-[#0F172A]">{selectedTransaction.description}</p>
+                </div>
+
+                {selectedTransaction.accountId && (
+                  <div>
+                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
+                      {selectedTransaction.type === "transfer" ? "From Account" : "Account"}
+                    </p>
+                    <span 
+                      className="inline-block px-3 py-1 rounded text-sm font-medium text-white"
+                      style={{ backgroundColor: accounts.find(a => a.id === selectedTransaction.accountId)?.color || "#6B7280" }}
+                    >
+                      {accounts.find(a => a.id === selectedTransaction.accountId)?.name}
+                    </span>
+                  </div>
+                )}
+
+                {selectedTransaction.toAccountId && (
+                  <div>
+                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">To Account</p>
+                    <span 
+                      className="inline-block px-3 py-1 rounded text-sm font-medium text-white"
+                      style={{ backgroundColor: accounts.find(a => a.id === selectedTransaction.toAccountId)?.color || "#6B7280" }}
+                    >
+                      {accounts.find(a => a.id === selectedTransaction.toAccountId)?.name}
+                    </span>
+                  </div>
+                )}
+
+                {selectedTransaction.category && (
+                  <div>
+                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Category</p>
+                    {selectedTransaction.type === "income" ? (
+                      <span className="inline-block px-3 py-1 rounded text-sm font-medium bg-[#22C55E] text-white">
+                        {selectedTransaction.category.replace(/_/g, " ").replace(/\b\w/g, (l: string) => l.toUpperCase())}
+                      </span>
+                    ) : (
+                      <span 
+                        className="inline-block px-3 py-1 rounded text-sm font-medium text-white"
+                        style={{ backgroundColor: categories.find(c => c.name === selectedTransaction.category)?.color || "#6B7280" }}
+                      >
+                        {selectedTransaction.category}
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {selectedTransaction.isRecurring && (
+                  <div>
+                    <p className="text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">Recurring</p>
+                    <span className="inline-block px-3 py-1 rounded text-sm font-medium bg-[#1E293B] text-white">
+                      {selectedTransaction.recurringInterval?.charAt(0).toUpperCase() + selectedTransaction.recurringInterval?.slice(1)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              {/* Actions */}
+              <div className="flex gap-3 pt-4 border-t border-gray-200">
+                <button
+                  onClick={() => {
+                    handleDeleteTransaction(selectedTransaction.id);
+                    closeTransactionDetail();
+                  }}
+                  className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors"
+                >
+                  Delete Transaction
+                </button>
+                <button
+                  onClick={closeTransactionDetail}
+                  className="flex-1 px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition-colors"
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

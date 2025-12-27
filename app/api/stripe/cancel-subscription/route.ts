@@ -17,9 +17,10 @@ const stripe = new Stripe(stripeSecret, {
 
 export async function POST(req: Request) {
   try {
-    const { userId, subscriptionId } = (await req.json()) as {
+    const { userId, subscriptionId, immediate = false } = (await req.json()) as {
       userId: string;
       subscriptionId: string;
+      immediate?: boolean;
     };
 
     if (!userId || !subscriptionId) {
@@ -29,29 +30,35 @@ export async function POST(req: Request) {
       );
     }
 
-    // Cancel the subscription at period end (user keeps access until billing cycle ends)
-    const subscription = await stripe.subscriptions.update(subscriptionId, {
-      cancel_at_period_end: true,
-    });
-
-    console.log(`🔄 Subscription ${subscriptionId} will be cancelled at period end for user ${userId}`);
-
-    // Optionally: Downgrade immediately to free plan
-    // Uncomment the following if you want immediate downgrade:
-    /*
-    await updateUserPlan({
-      userId,
-      plan: "free",
-      planInterval: "monthly",
-      stripeCustomerId: subscription.customer as string,
-      stripeSubscriptionId: "",
-    });
-    */
+    let subscription;
+    
+    if (immediate) {
+      // Cancel immediately (for account deletion)
+      subscription = await stripe.subscriptions.cancel(subscriptionId);
+      console.log(`🔄 Subscription ${subscriptionId} cancelled immediately for user ${userId}`);
+      
+      // Downgrade to free plan immediately
+      await updateUserPlan({
+        userId,
+        plan: "free",
+        planInterval: "monthly",
+        stripeCustomerId: subscription.customer as string,
+        stripeSubscriptionId: "",
+      });
+    } else {
+      // Cancel at period end (user keeps access until billing cycle ends)
+      subscription = await stripe.subscriptions.update(subscriptionId, {
+        cancel_at_period_end: true,
+      });
+      console.log(`🔄 Subscription ${subscriptionId} will be cancelled at period end for user ${userId}`);
+    }
 
     return NextResponse.json({
       success: true,
-      message: "Subscription will be cancelled at period end",
-      cancelAt: subscription.cancel_at,
+      message: immediate 
+        ? "Subscription cancelled immediately" 
+        : "Subscription will be cancelled at period end",
+      cancelAt: subscription.cancel_at || subscription.canceled_at,
     });
   } catch (error) {
     console.error("Error cancelling subscription:", error);

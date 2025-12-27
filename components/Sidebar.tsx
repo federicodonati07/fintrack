@@ -63,23 +63,13 @@ const navigationItems: NavItem[] = [
   },
   { divider: true, section: "Analysis" },
   {
-    label: "Reports",
-    icon: DocumentTextIcon,
+    label: "Analytics",
+    icon: ChartBarIcon,
     children: [
-      { label: "Monthly Report", href: "/dashboard/reports/monthly" },
-      { label: "Annual Report", href: "/dashboard/reports/yearly" },
-      { label: "Category Breakdown", href: "/dashboard/reports/categories" },
+      { label: "Global Analytics", href: "/dashboard/analytics" },
+      { label: "Scheduled Analytics", href: "/dashboard/analytics/scheduled" },
+      { label: "Portfolio Analytics", href: "/dashboard/analytics/portfolio" },
     ],
-  },
-  {
-    label: "Budget",
-    href: "/dashboard/budget",
-    icon: CurrencyEuroIcon,
-  },
-  {
-    label: "Goals",
-    href: "/dashboard/goals",
-    icon: FlagIcon,
   },
 ];
 
@@ -100,7 +90,7 @@ export default function Sidebar() {
   const router = useRouter();
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [expandedItems, setExpandedItems] = useState<string[]>([]);
+  const [expandedItems, setExpandedItems] = useState<string[]>(["Analytics"]);
   const [isCollapsed, setIsCollapsed] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);

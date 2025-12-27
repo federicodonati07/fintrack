@@ -11,6 +11,7 @@ import {
   getUserCategories,
   getTransactions,
   getSubAccounts,
+  getPlanLimits,
 } from "@/lib/firestore";
 import {
   WalletIcon,
@@ -29,10 +30,52 @@ import {
 } from "@heroicons/react/24/outline";
 import Toast from "@/components/Toast";
 import { useToast } from "@/hooks/useToast";
+import { useCurrency } from "@/contexts/CurrencyContext";
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+  Filler,
+} from "chart.js";
+import { Line } from "react-chartjs-2";
+
+ChartJS.register(
+  CategoryScale,
+  LinearScale,
+  PointElement,
+  LineElement,
+  BarElement,
+  Title,
+  Tooltip,
+  Legend,
+  Filler
+);
 
 type Plan = "free" | "pro" | "ultra" | "admin";
 
+// Format large numbers with K, M, B suffixes
+const formatCompactAmount = (value: number, currencySymbol: string): string => {
+  const absValue = Math.abs(value);
+  
+  if (absValue >= 1_000_000_000) {
+    return `${currencySymbol}${(value / 1_000_000_000).toFixed(2)}B`;
+  } else if (absValue >= 1_000_000) {
+    return `${currencySymbol}${(value / 1_000_000).toFixed(2)}M`;
+  } else if (absValue >= 1_000) {
+    return `${currencySymbol}${(value / 1_000).toFixed(2)}K`;
+  }
+  
+  return `${currencySymbol}${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
+
 export default function Dashboard() {
+  const { formatAmount, currency } = useCurrency();
   const [user, setUser] = useState<any>(null);
   const [userPlan, setUserPlan] = useState<Plan>("free");
   const [userInterval, setUserInterval] = useState<"monthly" | "yearly">("monthly");
@@ -45,6 +88,9 @@ export default function Dashboard() {
   const [limits, setLimits] = useState({ accounts: 1, categories: 10 });
   const [isAdmin, setIsAdmin] = useState(false);
   const [recentTransactions, setRecentTransactions] = useState<any[]>([]);
+  const [monthlyBalanceData, setMonthlyBalanceData] = useState<number[]>([]);
+  const [monthlyIncomeData, setMonthlyIncomeData] = useState<number[]>([]);
+  const [monthlyExpensesData, setMonthlyExpensesData] = useState<number[]>([]);
   const router = useRouter();
   const { toast, showToast, hideToast } = useToast();
 
@@ -74,13 +120,8 @@ export default function Dashboard() {
           }
         }
 
-        const planLimits =
-          plan === "ultra"
-            ? { accounts: Infinity, categories: Infinity }
-            : plan === "pro"
-            ? { accounts: 10, categories: 50 }
-            : { accounts: 1, categories: 10 };
-
+        // Fetch plan limits from Firestore
+        const planLimits = await getPlanLimits(plan);
         setLimits(planLimits);
 
         const userCategories = await getUserCategories(currentUser.uid);
@@ -122,6 +163,64 @@ export default function Dashboard() {
 
         setMonthlyIncome(income);
         setMonthlyExpenses(expenses);
+
+        // Calculate monthly cumulative data for graphs (last 12 months)
+        const last12Months = Array.from({ length: 12 }, (_, i) => {
+          const date = new Date();
+          date.setMonth(date.getMonth() - (11 - i));
+          return {
+            month: date.getMonth(),
+            year: date.getFullYear(),
+            income: 0,
+            expenses: 0,
+            balance: 0,
+          };
+        });
+
+        transactions.forEach(transaction => {
+          const transactionDate = transaction.date?.toDate ? transaction.date.toDate() : new Date(transaction.date);
+          const monthIndex = last12Months.findIndex(
+            m => m.month === transactionDate.getMonth() && m.year === transactionDate.getFullYear()
+          );
+
+          if (monthIndex !== -1) {
+            if (transaction.type === "income") {
+              last12Months[monthIndex].income += transaction.amount;
+            } else if (transaction.type === "expense") {
+              last12Months[monthIndex].expenses += transaction.amount;
+            }
+          }
+        });
+
+        // Calculate cumulative balance starting from current total and going backward
+        const currentTotal = total; // total balance already calculated above
+        let runningBalance = currentTotal;
+        
+        // Set current month
+        const currentMonthIndex = last12Months.findIndex(
+          m => m.month === now.getMonth() && m.year === now.getFullYear()
+        );
+        
+        if (currentMonthIndex !== -1) {
+          last12Months[currentMonthIndex].balance = runningBalance;
+          
+          // Work backwards from current month
+          for (let i = currentMonthIndex - 1; i >= 0; i--) {
+            runningBalance = Math.max(0, runningBalance - last12Months[i + 1].income + last12Months[i + 1].expenses);
+            last12Months[i].balance = runningBalance;
+          }
+          
+          // Work forwards from current month
+          runningBalance = currentTotal;
+          for (let i = currentMonthIndex + 1; i < last12Months.length; i++) {
+            runningBalance = Math.max(0, runningBalance + last12Months[i].income - last12Months[i].expenses);
+            last12Months[i].balance = runningBalance;
+          }
+        }
+
+        setMonthlyBalanceData(last12Months.map(m => m.balance));
+        setMonthlyIncomeData(last12Months.map(m => m.income));
+        setMonthlyExpensesData(last12Months.map(m => m.expenses));
       } catch (error) {
         console.error("Error fetching user data:", error);
       }
@@ -230,19 +329,20 @@ export default function Dashboard() {
 
         {/* Stats Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-          {/* Total Balance */}
-          <Card className="border border-gray-200 shadow-sm hover:shadow-md transition-all duration-200 bg-white rounded-lg">
+          {/* Total Balance - Highlighted */}
+          <Card className="border-2 border-[#0F172A] shadow-lg hover:shadow-xl transition-all duration-200 bg-gradient-to-br from-[#0F172A] to-[#1E293B] rounded-lg">
             <CardBody className="p-6">
               <div className="flex items-start justify-between mb-4">
-                <div className="p-2.5 bg-gray-100 rounded-lg">
-                  <WalletIcon className="w-5 h-5 text-[#0F172A]" />
+                <div className="p-2.5 bg-white/20 backdrop-blur-sm rounded-lg">
+                  <WalletIcon className="w-5 h-5 text-white" />
                 </div>
+                <SparklesIcon className="w-5 h-5 text-white/60" />
               </div>
-              <p className="text-xs font-medium text-gray-500 mb-2 uppercase tracking-wider">
+              <p className="text-xs font-bold text-white/80 mb-2 uppercase tracking-wider">
                 Total Balance
               </p>
-              <p className="text-3xl font-semibold text-[#0F172A]">€{totalBalance.toFixed(2)}</p>
-              <p className="text-xs text-gray-400 mt-1">All accounts</p>
+              <p className="text-3xl font-semibold text-white">{formatCompactAmount(totalBalance, currency.symbol)}</p>
+              <p className="text-xs text-white/60 mt-1 font-medium">All accounts & partitions</p>
             </CardBody>
           </Card>
 
@@ -257,26 +357,26 @@ export default function Dashboard() {
               <p className="text-xs font-medium text-gray-500 mb-2 uppercase tracking-wider">
                 Income
               </p>
-              <p className="text-3xl font-semibold text-[#0F172A]">€{monthlyIncome.toFixed(2)}</p>
+              <p className="text-3xl font-semibold text-[#0F172A]">{formatCompactAmount(monthlyIncome, currency.symbol)}</p>
               <p className="text-xs text-gray-400 mt-1">This month</p>
             </CardBody>
           </Card>
 
-          {/* Expenses */}
-          <Card className="border border-gray-200 shadow-sm hover:shadow-md transition-all duration-200 bg-white rounded-lg cursor-pointer" onClick={() => router.push("/dashboard/transactions")}>
-            <CardBody className="p-6">
-              <div className="flex items-start justify-between mb-4">
-                <div className="p-2.5 bg-gray-100 rounded-lg">
-                  <BanknotesIcon className="w-5 h-5 text-[#0F172A]" />
-                </div>
-              </div>
-              <p className="text-xs font-medium text-gray-500 mb-2 uppercase tracking-wider">
-                Expenses
-              </p>
-              <p className="text-3xl font-semibold text-[#0F172A]">€{monthlyExpenses.toFixed(2)}</p>
-              <p className="text-xs text-gray-400 mt-1">This month</p>
-            </CardBody>
-          </Card>
+           {/* Expenses */}
+           <Card className="border border-gray-200 shadow-sm hover:shadow-md transition-all duration-200 bg-white rounded-lg cursor-pointer" onClick={() => router.push("/dashboard/transactions")}>
+             <CardBody className="p-6">
+               <div className="flex items-start justify-between mb-4">
+                 <div className="p-2.5 bg-red-500/10 rounded-lg">
+                   <BanknotesIcon className="w-5 h-5 text-red-600" />
+                 </div>
+               </div>
+               <p className="text-xs font-medium text-gray-500 mb-2 uppercase tracking-wider">
+                 Expenses
+               </p>
+               <p className="text-3xl font-semibold text-[#0F172A]">{formatCompactAmount(monthlyExpenses, currency.symbol)}</p>
+               <p className="text-xs text-gray-400 mt-1">This month</p>
+             </CardBody>
+           </Card>
 
           {/* Accounts */}
           <Card className="border border-gray-200 shadow-sm hover:shadow-md transition-all duration-200 bg-white rounded-lg cursor-pointer" onClick={() => router.push("/dashboard/accounts")}>
@@ -389,9 +489,183 @@ export default function Dashboard() {
               </div>
             </CardBody>
           </Card>
-        </div>
+         </div>
 
-        {/* Recent Transactions */}
+         {/* Financial Trends - Graphs */}
+         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+           {/* Balance Trend */}
+           <Card className="border border-gray-200 shadow-sm bg-white rounded-lg">
+             <CardBody className="p-5">
+               <h3 className="text-sm font-semibold text-[#0F172A] mb-4">Balance Trend (12 Months)</h3>
+               <div className="h-40">
+                 <Line
+                   data={{
+                     labels: Array.from({ length: 12 }, (_, i) => {
+                       const date = new Date();
+                       date.setMonth(date.getMonth() - (11 - i));
+                       return date.toLocaleDateString("en-US", { month: "short" });
+                     }),
+                     datasets: [{
+                       label: "Balance",
+                       data: monthlyBalanceData,
+                       borderColor: "#0F172A",
+                       backgroundColor: "rgba(15, 23, 42, 0.1)",
+                       fill: true,
+                       tension: 0.4,
+                       borderWidth: 2,
+                       pointRadius: 2,
+                       pointHoverRadius: 4,
+                     }],
+                   }}
+                   options={{
+                     responsive: true,
+                     maintainAspectRatio: false,
+                     plugins: {
+                       legend: { display: false },
+                       tooltip: { 
+                         enabled: true,
+                         callbacks: {
+                           label: (context) => `€${context.parsed.y.toFixed(2)}`
+                         }
+                       },
+                     },
+                     scales: {
+                       x: { 
+                         display: true,
+                         grid: { display: false },
+                         ticks: { font: { size: 10 } }
+                       },
+                       y: { 
+                         display: true,
+                         grid: { color: "#F3F4F6" },
+                         ticks: { 
+                           font: { size: 10 },
+                           callback: (value) => `${currency.symbol}${value}`
+                         }
+                       },
+                     },
+                   }}
+                 />
+               </div>
+             </CardBody>
+           </Card>
+
+           {/* Income Trend */}
+           <Card className="border border-gray-200 shadow-sm bg-white rounded-lg">
+             <CardBody className="p-5">
+               <h3 className="text-sm font-semibold text-[#0F172A] mb-4">Monthly Income Trend</h3>
+               <div className="h-40">
+                 <Line
+                   data={{
+                     labels: Array.from({ length: 12 }, (_, i) => {
+                       const date = new Date();
+                       date.setMonth(date.getMonth() - (11 - i));
+                       return date.toLocaleDateString("en-US", { month: "short" });
+                     }),
+                     datasets: [{
+                       label: "Income",
+                       data: monthlyIncomeData,
+                       borderColor: "#22C55E",
+                       backgroundColor: "rgba(34, 197, 94, 0.1)",
+                       fill: true,
+                       tension: 0.4,
+                       borderWidth: 2,
+                       pointRadius: 2,
+                       pointHoverRadius: 4,
+                     }],
+                   }}
+                   options={{
+                     responsive: true,
+                     maintainAspectRatio: false,
+                     plugins: {
+                       legend: { display: false },
+                       tooltip: { 
+                         enabled: true,
+                         callbacks: {
+                           label: (context) => `€${context.parsed.y.toFixed(2)}`
+                         }
+                       },
+                     },
+                     scales: {
+                       x: { 
+                         display: true,
+                         grid: { display: false },
+                         ticks: { font: { size: 10 } }
+                       },
+                       y: { 
+                         display: true,
+                         grid: { color: "#F3F4F6" },
+                         ticks: { 
+                           font: { size: 10 },
+                           callback: (value) => `${currency.symbol}${value}`
+                         }
+                       },
+                     },
+                   }}
+                 />
+               </div>
+             </CardBody>
+           </Card>
+
+           {/* Expenses Trend */}
+           <Card className="border border-gray-200 shadow-sm bg-white rounded-lg">
+             <CardBody className="p-5">
+               <h3 className="text-sm font-semibold text-[#0F172A] mb-4">Monthly Expenses Trend</h3>
+               <div className="h-40">
+                 <Line
+                   data={{
+                     labels: Array.from({ length: 12 }, (_, i) => {
+                       const date = new Date();
+                       date.setMonth(date.getMonth() - (11 - i));
+                       return date.toLocaleDateString("en-US", { month: "short" });
+                     }),
+                     datasets: [{
+                       label: "Expenses",
+                       data: monthlyExpensesData,
+                       borderColor: "#EF4444",
+                       backgroundColor: "rgba(239, 68, 68, 0.1)",
+                       fill: true,
+                       tension: 0.4,
+                       borderWidth: 2,
+                       pointRadius: 2,
+                       pointHoverRadius: 4,
+                     }],
+                   }}
+                   options={{
+                     responsive: true,
+                     maintainAspectRatio: false,
+                     plugins: {
+                       legend: { display: false },
+                       tooltip: { 
+                         enabled: true,
+                         callbacks: {
+                           label: (context) => `€${context.parsed.y.toFixed(2)}`
+                         }
+                       },
+                     },
+                     scales: {
+                       x: { 
+                         display: true,
+                         grid: { display: false },
+                         ticks: { font: { size: 10 } }
+                       },
+                       y: { 
+                         display: true,
+                         grid: { color: "#F3F4F6" },
+                         ticks: { 
+                           font: { size: 10 },
+                           callback: (value) => `${currency.symbol}${value}`
+                         }
+                       },
+                     },
+                   }}
+                 />
+               </div>
+             </CardBody>
+           </Card>
+         </div>
+
+         {/* Recent Transactions */}
         <Card className="border border-gray-200 shadow-sm bg-white rounded-lg">
           <CardBody className="p-6">
             <div className="flex items-center justify-between mb-5">
@@ -419,10 +693,11 @@ export default function Dashboard() {
                                   transaction.type === "expense" ? ArrowDownIcon :
                                   ArrowsRightLeftIcon;
                   const iconBg = transaction.type === "income" ? "bg-[#22C55E]/10" : 
-                                   transaction.type === "expense" ? "bg-gray-100" : 
-                                   "bg-gray-100";
+                                   transaction.type === "expense" ? "bg-red-500/10" : 
+                                   "bg-blue-500/10";
                   const iconColor = transaction.type === "income" ? "text-[#22C55E]" :
-                                    "text-[#0F172A]";
+                                    transaction.type === "expense" ? "text-red-500" :
+                                    "text-blue-500";
                   const amountColor = transaction.type === "income" ? "text-[#22C55E]" :
                                       transaction.type === "expense" ? "text-[#0F172A]" :
                                       "text-[#0F172A]";
@@ -448,7 +723,7 @@ export default function Dashboard() {
                         </div>
                       </div>
                       <p className={`text-base font-semibold ${amountColor}`}>
-                        {transaction.type === "expense" ? "-" : transaction.type === "income" ? "+" : ""}€{transaction.amount.toFixed(2)}
+                        {transaction.type === "expense" ? "-" : transaction.type === "income" ? "+" : ""}{formatAmount(transaction.amount)}
                       </p>
                     </div>
                   );
