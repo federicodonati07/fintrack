@@ -235,23 +235,23 @@ export default function CategoriesPage() {
         onClose={hideToast}
       />
 
-      <div className="bg-gradient-to-br from-white to-gray-50/50 border-b border-gray-100 px-8 py-8">
+      <div className="bg-white border-b border-gray-200 px-8 py-6">
         <button
           onClick={() => router.back()}
-          className="flex items-center gap-2 text-sm text-gray-500 hover:text-[#22C55E] transition-all mb-6 group font-medium"
+          className="flex items-center gap-2 text-sm text-gray-500 hover:text-[#0F172A] transition-colors mb-4 group font-medium"
         >
           <ArrowLeftIcon className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
           Back
         </button>
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-[#0F172A] mb-2">
+            <h1 className="text-2xl font-semibold text-[#0F172A] mb-1">
               Categories
             </h1>
             <p className="text-sm text-gray-500 flex items-center gap-2">
-              <span className={`px-3 py-1 rounded-full font-semibold ${
+              <span className={`px-2.5 py-0.5 rounded text-xs font-semibold ${
                 categories.length >= limit 
-                  ? "bg-red-100 text-red-600" 
+                  ? "bg-gray-100 text-gray-600" 
                   : "bg-[#22C55E]/10 text-[#22C55E]"
               }`}>
                 {categories.length}/{limit}
@@ -262,7 +262,7 @@ export default function CategoriesPage() {
           {categories.length >= limit ? (
             <Button
               onClick={() => router.push("/dashboard/plan")}
-              className="bg-gradient-to-r from-amber-500 via-orange-500 to-red-500 text-white font-bold px-8 rounded-2xl shadow-xl hover:shadow-2xl hover:scale-105 transition-all animate-pulse h-12"
+              className="bg-[#22C55E] hover:bg-[#16A34A] text-white font-medium px-6 rounded-lg transition-colors h-11"
               startContent={<SparklesIcon className="w-5 h-5" />}
             >
               Upgrade Plan
@@ -270,7 +270,7 @@ export default function CategoriesPage() {
           ) : (
             <Button
               onClick={() => setShowCreateModal(true)}
-              className="rounded-2xl transition-all duration-200 shadow-lg font-semibold px-6 h-12 bg-gradient-to-r from-[#22C55E] to-[#16A34A] text-white hover:shadow-xl hover:scale-105"
+              className="rounded-lg transition-colors shadow-sm font-medium px-6 h-11 bg-[#0F172A] text-white hover:bg-[#1E293B]"
               startContent={<PlusIcon className="w-5 h-5" />}
             >
               New Category
@@ -279,20 +279,20 @@ export default function CategoriesPage() {
         </div>
       </div>
 
-      <main className="px-8 py-10 bg-gradient-to-br from-gray-50 via-white to-gray-50 min-h-screen">
-        <div className="max-w-7xl mx-auto space-y-10">
+      <main className="px-8 py-8 bg-gray-50 min-h-screen">
+        <div className="max-w-7xl mx-auto space-y-6">
           {/* Fixed Categories */}
-          <div className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-blue-500 to-blue-600 flex items-center justify-center">
+          <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
+            <div className="flex items-center gap-3 mb-5">
+              <div className="w-10 h-10 rounded-lg bg-[#0F172A] flex items-center justify-center">
                 <TagIcon className="w-5 h-5 text-white" />
               </div>
               <div>
-                <h2 className="text-xl font-bold text-[#0F172A]">Fixed Expenses</h2>
+                <h2 className="text-lg font-semibold text-[#0F172A]">Fixed Expenses</h2>
                 <p className="text-xs text-gray-500">Regular monthly expenses</p>
               </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {categoriesByType.fixed.map((category) => (
                 <CategoryCard
                   key={category.id}
@@ -303,27 +303,27 @@ export default function CategoriesPage() {
               ))}
             </div>
             {categoriesByType.fixed.length === 0 && (
-              <div className="text-center py-12">
-                <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4">
-                  <TagIcon className="w-8 h-8 text-gray-400" />
+              <div className="text-center py-8">
+                <div className="w-12 h-12 rounded-lg bg-gray-100 flex items-center justify-center mx-auto mb-3">
+                  <TagIcon className="w-6 h-6 text-gray-400" />
                 </div>
-                <p className="text-sm text-gray-400">No fixed categories yet</p>
+                <p className="text-sm text-gray-500">No fixed categories yet</p>
               </div>
             )}
           </div>
 
           {/* Variable Categories */}
-          <div className="bg-white rounded-3xl p-8 shadow-sm border border-gray-100 hover:shadow-md transition-shadow">
-            <div className="flex items-center gap-3 mb-6">
-              <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-amber-500 to-orange-600 flex items-center justify-center">
+          <div className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
+            <div className="flex items-center gap-3 mb-5">
+              <div className="w-10 h-10 rounded-lg bg-[#0F172A] flex items-center justify-center">
                 <ArrowsRightLeftIcon className="w-5 h-5 text-white" />
               </div>
               <div>
-                <h2 className="text-xl font-bold text-[#0F172A]">Variable Expenses</h2>
+                <h2 className="text-lg font-semibold text-[#0F172A]">Variable Expenses</h2>
                 <p className="text-xs text-gray-500">Flexible spending categories</p>
               </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {categoriesByType.variable.map((category) => (
                 <CategoryCard
                   key={category.id}
@@ -334,7 +334,7 @@ export default function CategoriesPage() {
               ))}
             </div>
             {categoriesByType.variable.length === 0 && (
-              <div className="text-center py-12">
+              <div className="text-center py-8">
                 <div className="w-16 h-16 rounded-full bg-gray-100 flex items-center justify-center mx-auto mb-4">
                   <ArrowsRightLeftIcon className="w-8 h-8 text-gray-400" />
                 </div>
@@ -804,27 +804,24 @@ function CategoryCard({
   onDelete: (category: CategoryWithId) => void;
 }) {
   return (
-    <div className="group relative bg-gradient-to-br from-white to-gray-50 border border-gray-200 rounded-2xl p-6 hover:shadow-xl hover:scale-[1.02] hover:border-[#22C55E]/30 transition-all duration-200">
+    <div className="group relative bg-white border-2 border-gray-200 rounded-lg p-5 hover:shadow-md hover:border-gray-300 transition-all duration-200">
       {/* Color indicator bar */}
       <div
-        className="absolute top-0 left-0 right-0 h-1.5 rounded-t-2xl"
+        className="absolute top-0 left-0 right-0 h-1 rounded-t-lg"
         style={{ backgroundColor: category.color || "#22C55E" }}
       />
       
       <div className="flex items-start justify-between mb-4">
         <div className="flex items-center gap-3 flex-1">
           <div
-            className="w-12 h-12 rounded-2xl flex items-center justify-center shadow-sm"
-            style={{ backgroundColor: `${category.color || "#22C55E"}15` }}
+            className="w-10 h-10 rounded-lg flex items-center justify-center"
+            style={{ backgroundColor: category.color || "#22C55E" }}
           >
-            <div
-              className="w-6 h-6 rounded-full"
-              style={{ backgroundColor: category.color || "#22C55E" }}
-            />
+            <TagIcon className="w-5 h-5 text-white" />
           </div>
           <div className="flex-1 min-w-0">
-            <h3 className="font-bold text-[#0F172A] truncate text-base">{category.name}</h3>
-            <span className="text-xs px-2.5 py-1 bg-gray-100 text-gray-600 rounded-full capitalize inline-block mt-1 font-medium">
+            <h3 className="font-semibold text-[#0F172A] truncate text-sm">{category.name}</h3>
+            <span className="text-xs px-2 py-0.5 bg-gray-100 text-gray-600 rounded capitalize inline-block mt-1 font-medium">
               {category.type}
             </span>
           </div>
@@ -834,14 +831,14 @@ function CategoryCard({
       <div className="flex gap-2 pt-3 border-t border-gray-100">
         <button
           onClick={() => onEdit(category)}
-          className="flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium text-gray-600 hover:text-[#22C55E] hover:bg-[#22C55E]/5 rounded-xl transition-all"
+          className="flex-1 flex items-center justify-center gap-2 py-2 text-xs font-medium text-gray-600 hover:text-[#0F172A] hover:bg-gray-50 rounded-lg transition-all"
         >
           <PencilIcon className="w-4 h-4" />
           Edit
         </button>
         <button
           onClick={() => onDelete(category)}
-          className="flex-1 flex items-center justify-center gap-2 py-2 text-sm font-medium text-gray-600 hover:text-red-500 hover:bg-red-50 rounded-xl transition-all"
+          className="flex-1 flex items-center justify-center gap-2 py-2 text-xs font-medium text-gray-600 hover:text-[#0F172A] hover:bg-gray-50 rounded-lg transition-all"
         >
           <TrashIcon className="w-4 h-4" />
           Delete

@@ -194,18 +194,20 @@ export default function AllTransactionsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 p-6">
+    <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="mb-8">
-          <h1 className="text-4xl font-black text-[#0F172A] mb-2">All Transactions</h1>
-          <p className="text-gray-600">
-            View and filter all your financial transactions
-          </p>
+          <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+            <h1 className="text-2xl font-semibold text-[#0F172A] mb-1">All Transactions</h1>
+            <p className="text-sm text-gray-500">
+              View and filter all your financial transactions
+            </p>
+          </div>
         </div>
 
         {/* Search and Filters Bar */}
-        <div className="bg-white rounded-3xl shadow-lg border border-gray-100 p-6 mb-6">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-5 mb-6">
           <div className="flex flex-col md:flex-row gap-4">
             {/* Search */}
             <div className="flex-1 relative">
@@ -215,19 +217,19 @@ export default function AllTransactionsPage() {
                 value={filters.searchText}
                 onChange={(e) => setFilters({ ...filters, searchText: e.target.value })}
                 placeholder="Search transactions..."
-                className="w-full pl-12 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-[#0F172A] placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                className="w-full pl-12 pr-4 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-[#0F172A] placeholder:text-gray-400 focus:outline-none focus:ring-2 focus:ring-[#22C55E] focus:border-[#22C55E] transition-all"
               />
             </div>
 
             {/* Filter Button */}
             <button
               onClick={() => setShowFilters(!showFilters)}
-              className="relative px-6 py-3 bg-gradient-to-r from-blue-500 to-cyan-500 text-white rounded-xl font-semibold hover:shadow-lg transition-all flex items-center gap-2"
+              className="relative px-6 py-2.5 bg-[#0F172A] text-white rounded-lg font-medium hover:bg-[#1E293B] transition-all flex items-center gap-2"
             >
               <FunnelIcon className="w-5 h-5" />
               Filters
               {activeFiltersCount > 0 && (
-                <span className="absolute -top-2 -right-2 w-6 h-6 bg-red-500 text-white text-xs font-bold rounded-full flex items-center justify-center">
+                <span className="absolute -top-1.5 -right-1.5 w-5 h-5 bg-[#22C55E] text-white text-xs font-bold rounded-full flex items-center justify-center">
                   {activeFiltersCount}
                 </span>
               )}
@@ -425,54 +427,53 @@ export default function AllTransactionsPage() {
                 return (
                   <div
                     key={transaction.id}
-                    className="group flex items-center gap-4 p-6 hover:bg-gradient-to-r hover:from-gray-50 hover:to-white transition-all duration-200 border-b border-gray-100 last:border-b-0"
+                    className="group flex items-center gap-4 p-5 hover:bg-gray-50 transition-colors border-b border-gray-100 last:border-b-0"
                   >
                     {/* Icon */}
                     <div
-                      className={`w-16 h-16 rounded-2xl flex items-center justify-center flex-shrink-0 shadow-lg group-hover:scale-105 transition-transform ${
+                      className={`w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0 ${
                         transaction.type === "income"
-                          ? "bg-gradient-to-br from-green-500 to-emerald-600"
+                          ? "bg-[#22C55E]/10"
                           : transaction.type === "expense"
-                          ? "bg-gradient-to-br from-red-500 to-rose-600"
+                          ? "bg-gray-100"
                           : transaction.type.startsWith("partition")
-                          ? "bg-gradient-to-br from-purple-500 to-pink-600"
-                          : "bg-gradient-to-br from-blue-500 to-cyan-600"
+                          ? "bg-[#1E293B]/10"
+                          : "bg-gray-100"
                       }`}
                     >
                       {transaction.type === "income" ? (
-                        <ArrowUpIcon className="w-8 h-8 text-white" />
+                        <ArrowUpIcon className="w-6 h-6 text-[#22C55E]" />
                       ) : transaction.type === "expense" ? (
-                        <ArrowDownIcon className="w-8 h-8 text-white" />
+                        <ArrowDownIcon className="w-6 h-6 text-[#0F172A]" />
                       ) : transaction.type.startsWith("partition") ? (
-                        <span className="text-2xl">📊</span>
+                        <span className="text-xl">📊</span>
                       ) : (
-                        <ArrowsRightLeftIcon className="w-8 h-8 text-white" />
+                        <ArrowsRightLeftIcon className="w-6 h-6 text-[#0F172A]" />
                       )}
                     </div>
 
                     {/* Details */}
                     <div className="flex-1 min-w-0">
-                      <p className="font-bold text-[#0F172A] text-lg mb-1.5 truncate">
+                      <p className="font-semibold text-[#0F172A] text-base mb-1.5 truncate">
                         {transaction.description}
                       </p>
                       <div className="flex flex-wrap items-center gap-2 text-sm">
-                        <span className="font-semibold text-gray-600 bg-gray-100 px-3 py-1 rounded-full">
+                        <span className="font-medium text-gray-600 bg-white px-2.5 py-1 rounded border border-gray-200 text-xs">
                           {transaction.type === "transfer"
                             ? `${account?.name} → ${toAccount?.name}`
                             : account?.name}
                         </span>
                         {transaction.type === "expense" && category && (
                           <span
-                            className="px-3 py-1 rounded-full text-xs font-bold shadow-sm"
+                            className="px-2.5 py-1 rounded text-xs font-medium text-white"
                             style={{
                               backgroundColor: `${category.color || "#6B7280"}`,
-                              color: "#FFFFFF",
                             }}
                           >
                             {category.name}
                           </span>
                         )}
-                        <span className="flex items-center gap-1.5 text-gray-500 bg-gray-50 px-3 py-1 rounded-full">
+                        <span className="flex items-center gap-1.5 text-gray-500 text-xs">
                           <CalendarIcon className="w-4 h-4" />
                           {transaction.date.toDate().toLocaleDateString("en-US", {
                             month: "short",
@@ -480,16 +481,6 @@ export default function AllTransactionsPage() {
                             year: "numeric",
                           })}
                         </span>
-                        {transaction.isRecurring && (
-                          <span className="px-3 py-1 bg-gradient-to-r from-purple-500 to-pink-500 text-white rounded-full text-xs font-bold shadow-md">
-                            🔄 Recurring
-                          </span>
-                        )}
-                        {transaction.type.startsWith("partition") && (
-                          <span className="px-3 py-1 bg-gradient-to-r from-purple-100 to-pink-100 text-purple-700 rounded-full text-xs font-bold">
-                            📊 Partition
-                          </span>
-                        )}
                       </div>
                     </div>
 
@@ -497,14 +488,10 @@ export default function AllTransactionsPage() {
                     <div className="flex items-center gap-4 flex-shrink-0">
                       <div className="text-right">
                         <p
-                          className={`text-2xl font-black ${
+                          className={`text-lg font-semibold ${
                             transaction.type === "income"
-                              ? "text-green-600"
-                              : transaction.type === "expense"
-                              ? "text-red-600"
-                              : transaction.type.startsWith("partition")
-                              ? "text-purple-600"
-                              : "text-blue-600"
+                              ? "text-[#22C55E]"
+                              : "text-[#0F172A]"
                           }`}
                         >
                           {transaction.type === "expense" ? "-" : transaction.type === "income" ? "+" : ""}
@@ -518,7 +505,7 @@ export default function AllTransactionsPage() {
                           e.stopPropagation();
                           handleDeleteTransaction(transaction.id);
                         }}
-                        className="opacity-0 group-hover:opacity-100 transition-opacity p-3 text-red-600 hover:bg-red-50 rounded-xl hover:shadow-md"
+                        className="opacity-0 group-hover:opacity-100 transition-opacity p-2 text-[#0F172A] hover:bg-gray-100 rounded-lg"
                         title="Delete transaction"
                       >
                         <TrashIcon className="w-5 h-5" />

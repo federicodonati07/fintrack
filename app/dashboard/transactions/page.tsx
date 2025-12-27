@@ -218,76 +218,78 @@ export default function TransactionsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-gray-50 to-zinc-50 p-6">
+    <div className="min-h-screen bg-gray-50 p-6">
       <div className="max-w-7xl mx-auto">
-        {/* Header with Premium Design */}
-        <div className="mb-8 relative">
-          <div className="absolute inset-0 bg-gradient-to-r from-blue-500/5 via-purple-500/5 to-pink-500/5 blur-3xl -z-10"></div>
-          <h1 className="text-5xl font-black bg-gradient-to-r from-[#0F172A] via-gray-800 to-[#0F172A] bg-clip-text text-transparent mb-3">
-            Income / Expenses
-          </h1>
-          <p className="text-gray-600 text-lg">Manage your income, expenses, and transfers with ease</p>
+        {/* Header */}
+        <div className="mb-8">
+          <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
+            <h1 className="text-2xl font-semibold text-[#0F172A] mb-1">Income / Expenses</h1>
+            <p className="text-sm text-gray-500">Manage your income, expenses, and transfers</p>
+          </div>
         </div>
 
         {/* Quick Actions */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-8">
           {/* Income Card */}
           <button
             onClick={() => openForm("income")}
-            className="group relative bg-gradient-to-br from-green-500 to-emerald-600 rounded-3xl p-8 text-left hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 overflow-hidden"
+            className="group relative bg-white border-2 border-gray-200 hover:border-[#22C55E] rounded-lg p-6 text-left hover:shadow-md transition-all duration-200"
           >
-            <div className="absolute top-0 right-0 w-40 h-40 bg-white/10 rounded-full blur-3xl"></div>
-            <div className="relative z-10">
-              <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                <ArrowUpIcon className="w-7 h-7 text-white" />
+            <div className="flex items-start gap-4">
+              <div className="p-3 bg-[#22C55E]/10 rounded-lg group-hover:bg-[#22C55E]/20 transition-colors">
+                <ArrowUpIcon className="w-6 h-6 text-[#22C55E]" />
               </div>
-              <h3 className="text-2xl font-bold text-white mb-2">Add Income</h3>
-              <p className="text-white/80 text-sm">Record salary, investments, or returns</p>
+              <div>
+                <h3 className="text-lg font-semibold text-[#0F172A] mb-1">Add Income</h3>
+                <p className="text-sm text-gray-500">Record salary, investments, or returns</p>
+              </div>
             </div>
           </button>
 
           {/* Expense Card */}
           <button
             onClick={() => openForm("expense")}
-            className="group relative bg-gradient-to-br from-red-500 to-rose-600 rounded-3xl p-8 text-left hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 overflow-hidden"
+            className="group relative bg-white border-2 border-gray-200 hover:border-[#0F172A] rounded-lg p-6 text-left hover:shadow-md transition-all duration-200"
           >
-            <div className="absolute top-0 right-0 w-40 h-40 bg-white/10 rounded-full blur-3xl"></div>
-            <div className="relative z-10">
-              <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                <ArrowDownIcon className="w-7 h-7 text-white" />
+            <div className="flex items-start gap-4">
+              <div className="p-3 bg-gray-100 rounded-lg group-hover:bg-gray-200 transition-colors">
+                <ArrowDownIcon className="w-6 h-6 text-[#0F172A]" />
               </div>
-              <h3 className="text-2xl font-bold text-white mb-2">Add Expense</h3>
-              <p className="text-white/80 text-sm">Track your spending by category</p>
+              <div>
+                <h3 className="text-lg font-semibold text-[#0F172A] mb-1">Add Expense</h3>
+                <p className="text-sm text-gray-500">Track your spending by category</p>
+              </div>
             </div>
           </button>
 
           {/* Transfer Card */}
           <button
             onClick={() => openForm("transfer")}
-            className="group relative bg-gradient-to-br from-blue-500 to-cyan-600 rounded-3xl p-8 text-left hover:shadow-2xl hover:-translate-y-1 transition-all duration-300 overflow-hidden"
+            className="group relative bg-white border-2 border-gray-200 hover:border-gray-400 rounded-lg p-6 text-left hover:shadow-md transition-all duration-200"
           >
-            <div className="absolute top-0 right-0 w-40 h-40 bg-white/10 rounded-full blur-3xl"></div>
-            <div className="relative z-10">
-              <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur-sm flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                <ArrowsRightLeftIcon className="w-7 h-7 text-white" />
+            <div className="flex items-start gap-4">
+              <div className="p-3 bg-gray-100 rounded-lg group-hover:bg-gray-200 transition-colors">
+                <ArrowsRightLeftIcon className="w-6 h-6 text-[#0F172A]" />
               </div>
-              <h3 className="text-2xl font-bold text-white mb-2">Transfer Funds</h3>
-              <p className="text-white/80 text-sm">Move money between accounts</p>
+              <div>
+                <h3 className="text-lg font-semibold text-[#0F172A] mb-1">Transfer Funds</h3>
+                <p className="text-sm text-gray-500">Move money between accounts</p>
+              </div>
             </div>
           </button>
         </div>
 
         {/* Transaction Form / Recent Transactions */}
-        <div className="bg-white rounded-3xl shadow-lg border border-gray-100 overflow-hidden">
+        <div className="bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
           {!showForm ? (
             <>
               {/* Recent Transactions Header */}
-              <div className="p-6 border-b border-gray-100">
+              <div className="p-6 border-b border-gray-200">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-bold text-[#0F172A]">Recent Transactions</h2>
+                  <h2 className="text-lg font-semibold text-[#0F172A]">Recent Transactions</h2>
                   <button
                     onClick={() => router.push("/dashboard/transactions/all")}
-                    className="text-sm font-semibold text-blue-600 hover:text-blue-700 transition-colors"
+                    className="text-sm font-medium text-[#0F172A] hover:text-[#22C55E] transition-colors"
                   >
                     View All →
                   </button>
@@ -312,40 +314,40 @@ export default function TransactionsPage() {
                       return (
                         <div
                           key={transaction.id}
-                          className="group flex items-center gap-4 p-5 rounded-2xl bg-gradient-to-br from-white to-gray-50 border-2 border-gray-100 hover:border-gray-200 hover:shadow-lg transition-all duration-200"
+                          className="group flex items-center gap-4 p-4 bg-gray-50 rounded-lg border border-gray-100 hover:border-gray-200 hover:shadow-sm transition-all duration-200"
                         >
                           <div
-                            className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-md group-hover:scale-105 transition-transform bg-gradient-to-br ${
+                            className={`w-12 h-12 rounded-lg flex items-center justify-center ${
                               transaction.type === "income"
-                                ? "from-green-500 to-emerald-600"
+                                ? "bg-[#22C55E]/10"
                                 : transaction.type === "expense"
-                                ? "from-red-500 to-rose-600"
+                                ? "bg-gray-100"
                                 : transaction.type.startsWith("partition")
-                                ? "from-purple-500 to-pink-600"
-                                : "from-blue-500 to-cyan-600"
+                                ? "bg-[#1E293B]/10"
+                                : "bg-gray-100"
                             }`}
                           >
                             {transaction.type === "income" ? (
-                              <ArrowUpIcon className="w-7 h-7 text-white" />
+                              <ArrowUpIcon className="w-6 h-6 text-[#22C55E]" />
                             ) : transaction.type === "expense" ? (
-                              <ArrowDownIcon className="w-7 h-7 text-white" />
+                              <ArrowDownIcon className="w-6 h-6 text-[#0F172A]" />
                             ) : transaction.type.startsWith("partition") ? (
-                              <span className="text-2xl">📊</span>
+                              <span className="text-lg">📊</span>
                             ) : (
-                              <ArrowsRightLeftIcon className="w-7 h-7 text-white" />
+                              <ArrowsRightLeftIcon className="w-6 h-6 text-[#0F172A]" />
                             )}
                           </div>
                           <div className="flex-1 min-w-0">
-                            <p className="font-bold text-[#0F172A] truncate text-base mb-1">{transaction.description}</p>
+                            <p className="font-medium text-[#0F172A] truncate text-sm mb-1">{transaction.description}</p>
                             <div className="flex items-center gap-2 flex-wrap">
-                              <span className="text-xs font-semibold text-gray-600 bg-gray-100 px-2.5 py-1 rounded-full">
+                              <span className="text-xs font-medium text-gray-600 bg-white px-2 py-0.5 rounded border border-gray-200">
                                 {transaction.type === "transfer"
                                   ? `${account?.name} → ${toAccount?.name}`
                                   : account?.name}
                               </span>
                               {transaction.type === "expense" && category && (
                                 <span
-                                  className="text-xs font-bold px-2.5 py-1 rounded-full text-white"
+                                  className="text-xs font-medium px-2 py-0.5 rounded text-white"
                                   style={{ backgroundColor: category.color || "#6B7280" }}
                                 >
                                   {category.name}
@@ -357,39 +359,28 @@ export default function TransactionsPage() {
                                   day: "numeric"
                                 })}
                               </span>
-                              {transaction.type.startsWith("partition") && (
-                                <span className="text-xs text-purple-700 bg-purple-100 px-2.5 py-1 rounded-full font-bold">
-                                  📊 Partition
-                                </span>
-                              )}
                             </div>
                           </div>
                           <div className="flex items-center gap-3">
-                            <div className="text-right">
-                              <p
-                                className={`font-black text-xl ${
-                                  transaction.type === "income"
-                                    ? "text-green-600"
-                                    : transaction.type === "expense"
-                                    ? "text-red-600"
-                                    : transaction.type.startsWith("partition")
-                                    ? "text-purple-600"
-                                    : "text-blue-600"
-                                }`}
-                              >
-                                {transaction.type === "expense" ? "-" : transaction.type === "income" ? "+" : ""}€
-                                {transaction.amount.toLocaleString("en-US", { minimumFractionDigits: 2 })}
-                              </p>
-                            </div>
+                            <p
+                              className={`font-semibold text-base ${
+                                transaction.type === "income"
+                                  ? "text-[#22C55E]"
+                                  : "text-[#0F172A]"
+                              }`}
+                            >
+                              {transaction.type === "expense" ? "-" : transaction.type === "income" ? "+" : ""}€
+                              {transaction.amount.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                            </p>
                             <button
                               onClick={(e) => {
                                 e.stopPropagation();
                                 handleDeleteTransaction(transaction.id);
                               }}
-                              className="opacity-0 group-hover:opacity-100 transition-opacity p-2.5 text-red-600 hover:bg-red-50 rounded-xl"
+                              className="opacity-0 group-hover:opacity-100 transition-opacity p-2 text-[#0F172A] hover:bg-gray-100 rounded-lg"
                               title="Delete transaction"
                             >
-                              <TrashIcon className="w-5 h-5" />
+                              <TrashIcon className="w-4 h-4" />
                             </button>
                           </div>
                         </div>

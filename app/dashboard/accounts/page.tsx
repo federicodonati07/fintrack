@@ -47,8 +47,8 @@ const ACCOUNT_TYPES = [
 ];
 
 const PRESET_COLORS = [
-  "#3B82F6", "#22C55E", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899",
-  "#14B8A6", "#F97316", "#06B6D4", "#A855F7", "#84CC16", "#F43F5E",
+  "#0F172A", "#1E293B", "#475569", "#64748B", "#94A3B8", "#CBD5E1",
+  "#22C55E", "#16A34A", "#15803D", "#166534", "#14532D", "#052E16",
 ];
 
 const INTEREST_FREQUENCIES = [
