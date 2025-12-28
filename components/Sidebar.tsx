@@ -86,6 +86,14 @@ const accountItems: NavItem[] = [
   },
 ];
 
+const adminItems: NavItem[] = [
+  {
+    label: "Admin Dashboard",
+    href: "/dashboard/admin",
+    icon: ShieldCheckIcon,
+  },
+];
+
 export default function Sidebar() {
   const router = useRouter();
   const pathname = usePathname();

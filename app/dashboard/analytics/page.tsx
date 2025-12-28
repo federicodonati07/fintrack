@@ -9,11 +9,13 @@ import {
   getUserDocument,
   getAccounts,
   getTransactions,
+  getAllTransactionsIncludingShared,
   getSubAccounts,
   getUserCategories,
   getAnalyticsConfig,
   saveAnalyticsConfig,
 } from "@/lib/firestore";
+import { getSharedAccounts } from "@/lib/sharedAccounts";
 import {
   ArrowLeftIcon,
   PlusIcon,
@@ -32,7 +34,7 @@ import {
   ClockIcon,
   Bars3Icon,
 } from "@heroicons/react/24/outline";
-import { Dialog, Transition, Listbox } from "@headlessui/react";
+import { Dialog, Transition, Listbox, Checkbox } from "@headlessui/react";
 import { CheckIcon, ChevronUpDownIcon } from "@heroicons/react/20/solid";
 import {
   Chart as ChartJS,
@@ -99,6 +101,8 @@ export default function GlobalAnalyticsPage() {
   const [userPlan, setUserPlan] = useState<Plan>("free");
   const [loading, setLoading] = useState(true);
   const [accounts, setAccounts] = useState<any[]>([]);
+  const [sharedAccounts, setSharedAccounts] = useState<any[]>([]);
+  const [includeSharedAccounts, setIncludeSharedAccounts] = useState(true);
   const [transactions, setTransactions] = useState<any[]>([]);
   const [categories, setCategories] = useState<any[]>([]);
   const [subAccounts, setSubAccounts] = useState<any[]>([]);
@@ -131,7 +135,16 @@ export default function GlobalAnalyticsPage() {
         const userAccounts = await getAccounts(currentUser.uid);
         setAccounts(userAccounts);
 
-        const userTransactions = await getTransactions(currentUser.uid);
+        // Load shared accounts
+        try {
+          const userSharedAccounts = await getSharedAccounts(currentUser.uid);
+          setSharedAccounts(userSharedAccounts);
+        } catch (error) {
+          console.error("Error loading shared accounts:", error);
+          setSharedAccounts([]);
+        }
+
+        const userTransactions = await getAllTransactionsIncludingShared(currentUser.uid);
         setTransactions(userTransactions);
 
         const userCategories = await getUserCategories(currentUser.uid);
@@ -167,6 +180,15 @@ export default function GlobalAnalyticsPage() {
     return planHierarchy[userPlan] >= planHierarchy[requiredPlan];
   };
 
+  // Filter transactions based on includeSharedAccounts
+  const filteredTransactions = useMemo(() => {
+    if (includeSharedAccounts) {
+      return transactions;
+    }
+    // Exclude shared account transactions
+    return transactions.filter(tx => !tx.isSharedAccountTransaction);
+  }, [transactions, includeSharedAccounts]);
+
   // Analytics calculations
   const monthlyData = useMemo(() => {
     const last12Months = Array.from({ length: 12 }, (_, i) => {
@@ -182,7 +204,7 @@ export default function GlobalAnalyticsPage() {
       };
     });
 
-    transactions.forEach((tx) => {
+    filteredTransactions.forEach((tx) => {
       const txDate = tx.date?.toDate ? tx.date.toDate() : new Date(tx.date);
       const monthIndex = last12Months.findIndex(
         (m) => m.month === txDate.getMonth() && m.year === txDate.getFullYear()
@@ -223,18 +245,18 @@ export default function GlobalAnalyticsPage() {
     }
 
     return last12Months;
-  }, [transactions, accounts, subAccounts]);
+  }, [filteredTransactions, accounts, subAccounts]);
 
   const expensesByCategory = useMemo(() => {
     const categoryMap: { [key: string]: number } = {};
-    transactions
+    filteredTransactions
       .filter((tx) => tx.type === "expense")
       .forEach((tx) => {
         const catName = tx.category || "Uncategorized";
         categoryMap[catName] = (categoryMap[catName] || 0) + tx.amount;
       });
     return Object.entries(categoryMap).map(([name, amount]) => ({ name, amount }));
-  }, [transactions]);
+  }, [filteredTransactions]);
 
   // Load sub-accounts for fund allocation
   useEffect(() => {
@@ -261,17 +283,28 @@ export default function GlobalAnalyticsPage() {
       });
     }
     
+    // Add shared accounts if enabled
+    if (includeSharedAccounts && sharedAccounts.length > 0) {
+      sharedAccounts.forEach((sharedAcc: any) => {
+        allocationData.push({
+          name: `${sharedAcc.name} (Shared)`,
+          balance: sharedAcc.currentBalance || 0,
+          color: sharedAcc.color || "#8B5CF6", // Purple default for shared
+        });
+      });
+    }
+    
     setFundAllocation(allocationData);
-  }, [accounts, subAccounts, user]);
+  }, [accounts, subAccounts, sharedAccounts, includeSharedAccounts, user]);
 
   const totalIncome = useMemo(
-    () => transactions.filter((tx) => tx.type === "income").reduce((sum, tx) => sum + tx.amount, 0),
-    [transactions]
+    () => filteredTransactions.filter((tx) => tx.type === "income").reduce((sum, tx) => sum + tx.amount, 0),
+    [filteredTransactions]
   );
 
   const totalExpenses = useMemo(
-    () => transactions.filter((tx) => tx.type === "expense").reduce((sum, tx) => sum + tx.amount, 0),
-    [transactions]
+    () => filteredTransactions.filter((tx) => tx.type === "expense").reduce((sum, tx) => sum + tx.amount, 0),
+    [filteredTransactions]
   );
 
   const savingRate = useMemo(() => {
@@ -288,47 +321,99 @@ export default function GlobalAnalyticsPage() {
   // Historical Balance Chart
   const HistoricalBalanceChart = () => {
     const generateHistoricalData = () => {
-      // Current total balance (accounts + partitions)
+      // Current total balance (accounts + partitions + shared accounts)
       const accountsBalance = accounts.reduce((sum, acc) => sum + (acc.currentBalance || 0), 0);
       const partitionsBalance = subAccounts.reduce((sum, sub) => sum + (sub.balance || 0), 0);
-      const currentTotalBalance = Math.max(0, accountsBalance + partitionsBalance);
+      const sharedBalance = includeSharedAccounts 
+        ? sharedAccounts.reduce((sum, acc) => sum + (acc.currentBalance || 0), 0)
+        : 0;
+      const currentTotalBalance = Math.max(0, accountsBalance + partitionsBalance + sharedBalance);
       
-      // Sort all transactions by date
-      const sortedTransactions = [...transactions].sort((a, b) => {
+      // Sort all filtered transactions by date
+      const sortedTransactions = [...filteredTransactions].sort((a, b) => {
         const dateA = a.date?.toDate ? a.date.toDate() : new Date(a.date);
         const dateB = b.date?.toDate ? b.date.toDate() : new Date(b.date);
         return dateA.getTime() - dateB.getTime();
       });
 
-      if (sortedTransactions.length === 0 || currentTotalBalance === 0) {
+      if (sortedTransactions.length === 0) {
         return { labels: ["Now"], data: [currentTotalBalance] };
       }
 
       const now = new Date();
       const firstTxDate = sortedTransactions[0].date?.toDate ? sortedTransactions[0].date.toDate() : new Date(sortedTransactions[0].date);
       
-      // Determine time range based on period
+      // Determine time range and intervals based on period
       let startDate: Date;
+      let intervals: Date[] = [];
+      
       switch (historicalPeriod) {
-        case "daily":
+        case "daily": {
+          // Last 24 hours, hourly
+          startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+          for (let i = 24; i >= 0; i--) {
+            intervals.push(new Date(now.getTime() - i * 60 * 60 * 1000));
+          }
+          break;
+        }
+        case "weekly": {
+          // Last 7 days, daily
+          startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          for (let i = 7; i >= 0; i--) {
+            intervals.push(new Date(now.getTime() - i * 24 * 60 * 60 * 1000));
+          }
+          break;
+        }
+        case "monthly": {
+          // Last 30 days, daily
           startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+          for (let i = 30; i >= 0; i--) {
+            intervals.push(new Date(now.getTime() - i * 24 * 60 * 60 * 1000));
+          }
           break;
-        case "weekly":
-          startDate = new Date(now.getTime() - 12 * 7 * 24 * 60 * 60 * 1000);
-          break;
-        case "monthly":
+        }
+        case "yearly": {
+          // Last 12 months, monthly
           startDate = new Date(now);
           startDate.setMonth(startDate.getMonth() - 12);
+          for (let i = 12; i >= 0; i--) {
+            const date = new Date(now);
+            date.setMonth(date.getMonth() - i);
+            intervals.push(date);
+          }
           break;
-        case "yearly":
-          startDate = new Date(now);
-          startDate.setFullYear(startDate.getFullYear() - 5);
-          break;
-        case "all":
+        }
+        case "all": {
+          // From first transaction to now
           startDate = firstTxDate;
+          const daysDiff = Math.ceil((now.getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000));
+          
+          if (daysDiff <= 30) {
+            // Less than 30 days: daily intervals
+            for (let i = 0; i <= daysDiff; i++) {
+              intervals.push(new Date(startDate.getTime() + i * 24 * 60 * 60 * 1000));
+            }
+          } else if (daysDiff <= 365) {
+            // Less than 1 year: weekly intervals
+            const weeks = Math.ceil(daysDiff / 7);
+            for (let i = 0; i <= weeks; i++) {
+              intervals.push(new Date(startDate.getTime() + i * 7 * 24 * 60 * 60 * 1000));
+            }
+          } else {
+            // More than 1 year: monthly intervals
+            const current = new Date(startDate);
+            while (current <= now) {
+              intervals.push(new Date(current));
+              current.setMonth(current.getMonth() + 1);
+            }
+          }
           break;
+        }
         default:
-          startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+          startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+          for (let i = 24; i >= 0; i--) {
+            intervals.push(new Date(now.getTime() - i * 60 * 60 * 1000));
+          }
       }
 
       // Filter transactions in the time range (exclude partition transactions)
@@ -339,61 +424,62 @@ export default function GlobalAnalyticsPage() {
         return inRange && isNotPartition;
       });
 
-      if (relevantTransactions.length === 0) {
-        return { labels: ["Now"], data: [currentTotalBalance] };
-      }
-
-      // Build data points only at transaction dates
+      // Calculate balance at each interval
       const dataPoints: { date: Date; balance: number }[] = [];
       
       // Start from current balance and work backwards
-      let runningBalance = currentTotalBalance;
+      let futureBalance = currentTotalBalance;
       
-      // Go through transactions from newest to oldest
-      for (let i = relevantTransactions.length - 1; i >= 0; i--) {
-        const tx = relevantTransactions[i];
-        const txDate = tx.date?.toDate ? tx.date.toDate() : new Date(tx.date);
+      for (let i = intervals.length - 1; i >= 0; i--) {
+        const intervalDate = intervals[i];
         
-        // Add current point before processing this transaction
-        dataPoints.unshift({
-          date: new Date(txDate),
-          balance: Math.max(0, runningBalance),
+        // Find all transactions after this interval up to the next interval (or now)
+        const nextInterval = i < intervals.length - 1 ? intervals[i + 1] : now;
+        const txsInInterval = relevantTransactions.filter(tx => {
+          const txDate = tx.date?.toDate ? tx.date.toDate() : new Date(tx.date);
+          return txDate > intervalDate && txDate <= nextInterval;
         });
         
-        // Subtract this transaction to get previous balance
-        if (tx.type === "income") {
-          runningBalance = Math.max(0, runningBalance - tx.amount);
-        } else if (tx.type === "expense") {
-          runningBalance = Math.max(0, runningBalance + tx.amount);
+        // Subtract these transactions from future balance to get balance at this interval
+        let balanceAtInterval = futureBalance;
+        for (const tx of txsInInterval) {
+          if (tx.type === "income") {
+            balanceAtInterval -= tx.amount;
+          } else if (tx.type === "expense") {
+            balanceAtInterval += tx.amount;
+          }
+          // Transfers don't affect total balance
         }
-        // Transfers don't affect total balance
-      }
-      
-      // Add the oldest point (before first transaction)
-      if (dataPoints.length > 0) {
+        
         dataPoints.unshift({
-          date: new Date(dataPoints[0].date.getTime() - 1000),
-          balance: Math.max(0, runningBalance),
+          date: new Date(intervalDate),
+          balance: Math.max(0, balanceAtInterval),
         });
+        
+        futureBalance = balanceAtInterval;
       }
-      
-      // Add current point at the end
-      dataPoints.push({
-        date: now,
-        balance: currentTotalBalance,
-      });
 
       // Format labels based on period
       const formatLabel = (date: Date) => {
         switch (historicalPeriod) {
           case "daily":
+            return date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
           case "weekly":
             return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
           case "monthly":
-            return date.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
+            return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
           case "yearly":
-          case "all":
-            return date.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+            return date.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
+          case "all": {
+            const daysDiff = Math.ceil((now.getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000));
+            if (daysDiff <= 30) {
+              return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+            } else if (daysDiff <= 365) {
+              return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+            } else {
+              return date.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
+            }
+          }
           default:
             return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
         }
@@ -497,6 +583,257 @@ export default function GlobalAnalyticsPage() {
                 className="bg-[#22C55E] hover:bg-[#16A34A] text-white rounded-lg font-medium"
               >
                 Upgrade to {requiredPlan === "ultra" ? "Ultra" : "Pro"}
+              </Button>
+            </div>
+          )}
+        </CardBody>
+      </Card>
+    );
+  };
+
+  // Historical Expense Chart
+  const HistoricalExpenseChart = () => {
+    const generateHistoricalExpenseData = () => {
+      // Sort all expense transactions by date
+      const expenseTransactions = filteredTransactions
+        .filter(tx => tx.type === "expense")
+        .sort((a, b) => {
+          const dateA = a.date?.toDate ? a.date.toDate() : new Date(a.date);
+          const dateB = b.date?.toDate ? b.date.toDate() : new Date(b.date);
+          return dateA.getTime() - dateB.getTime();
+        });
+
+      if (expenseTransactions.length === 0) {
+        return { labels: ["Now"], data: [0] };
+      }
+
+      const now = new Date();
+      const firstTxDate = expenseTransactions[0].date?.toDate 
+        ? expenseTransactions[0].date.toDate() 
+        : new Date(expenseTransactions[0].date);
+      
+      // Determine time range and intervals based on period
+      let startDate: Date;
+      let intervals: Date[] = [];
+      
+      switch (historicalPeriod) {
+        case "daily": {
+          // Last 24 hours, hourly
+          startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+          for (let i = 24; i >= 0; i--) {
+            intervals.push(new Date(now.getTime() - i * 60 * 60 * 1000));
+          }
+          break;
+        }
+        case "weekly": {
+          // Last 7 days, daily
+          startDate = new Date(now.getTime() - 7 * 24 * 60 * 60 * 1000);
+          for (let i = 7; i >= 0; i--) {
+            intervals.push(new Date(now.getTime() - i * 24 * 60 * 60 * 1000));
+          }
+          break;
+        }
+        case "monthly": {
+          // Last 30 days, daily
+          startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+          for (let i = 30; i >= 0; i--) {
+            intervals.push(new Date(now.getTime() - i * 24 * 60 * 60 * 1000));
+          }
+          break;
+        }
+        case "yearly": {
+          // Last 12 months, monthly
+          startDate = new Date(now);
+          startDate.setMonth(startDate.getMonth() - 12);
+          for (let i = 12; i >= 0; i--) {
+            const date = new Date(now);
+            date.setMonth(date.getMonth() - i);
+            intervals.push(date);
+          }
+          break;
+        }
+        case "all": {
+          // From first transaction to now
+          startDate = firstTxDate;
+          const daysDiff = Math.ceil((now.getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000));
+          
+          if (daysDiff <= 30) {
+            // Less than 30 days: daily intervals
+            for (let i = 0; i <= daysDiff; i++) {
+              intervals.push(new Date(startDate.getTime() + i * 24 * 60 * 60 * 1000));
+            }
+          } else if (daysDiff <= 365) {
+            // Less than 1 year: weekly intervals
+            const weeks = Math.ceil(daysDiff / 7);
+            for (let i = 0; i <= weeks; i++) {
+              intervals.push(new Date(startDate.getTime() + i * 7 * 24 * 60 * 60 * 1000));
+            }
+          } else {
+            // More than 1 year: monthly intervals
+            const current = new Date(startDate);
+            while (current <= now) {
+              intervals.push(new Date(current));
+              current.setMonth(current.getMonth() + 1);
+            }
+          }
+          break;
+        }
+        default:
+          startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+          for (let i = 24; i >= 0; i--) {
+            intervals.push(new Date(now.getTime() - i * 60 * 60 * 1000));
+          }
+      }
+
+      // Filter expense transactions in the time range
+      const relevantExpenses = expenseTransactions.filter(tx => {
+        const txDate = tx.date?.toDate ? tx.date.toDate() : new Date(tx.date);
+        return txDate >= startDate && txDate <= now;
+      });
+
+      // Calculate cumulative expenses at each interval
+      const dataPoints: { date: Date; expense: number }[] = [];
+      
+      for (let i = 0; i < intervals.length; i++) {
+        const intervalDate = intervals[i];
+        
+        // Sum all expenses up to this interval
+        const expensesUpToInterval = relevantExpenses.filter(tx => {
+          const txDate = tx.date?.toDate ? tx.date.toDate() : new Date(tx.date);
+          return txDate <= intervalDate;
+        });
+        
+        const totalExpense = expensesUpToInterval.reduce((sum, tx) => sum + tx.amount, 0);
+        
+        dataPoints.push({
+          date: new Date(intervalDate),
+          expense: totalExpense,
+        });
+      }
+
+      // Format labels based on period
+      const formatLabel = (date: Date) => {
+        switch (historicalPeriod) {
+          case "daily":
+            return date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" });
+          case "weekly":
+            return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+          case "monthly":
+            return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+          case "yearly":
+            return date.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
+          case "all": {
+            const daysDiff = Math.ceil((now.getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000));
+            if (daysDiff <= 30) {
+              return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+            } else if (daysDiff <= 365) {
+              return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+            } else {
+              return date.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
+            }
+          }
+          default:
+            return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+        }
+      };
+
+      return {
+        labels: dataPoints.map(p => formatLabel(p.date)),
+        data: dataPoints.map(p => p.expense),
+      };
+    };
+
+    const historicalExpenseData = generateHistoricalExpenseData();
+    const hasAccess = canAccessChart("ultra");
+
+    return (
+      <Card className={`border border-gray-200 shadow-sm bg-white rounded-lg ${!hasAccess ? "opacity-60" : ""}`}>
+        <CardBody className="p-6">
+          <div className="flex items-center justify-between mb-4">
+            <div className="flex items-center gap-3">
+              <div className="p-2.5 bg-red-600 rounded-lg">
+                <ArrowTrendingDownIcon className="w-5 h-5 text-white" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-[#0F172A]">Historical Expense</h3>
+                <p className="text-xs text-gray-500">Cumulative expenses over time</p>
+              </div>
+            </div>
+            
+            {/* Period Selector */}
+            <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+              {[
+                { value: "daily", label: "Day" },
+                { value: "weekly", label: "Week" },
+                { value: "monthly", label: "Month" },
+                { value: "yearly", label: "Year" },
+                { value: "all", label: "All" },
+              ].map((period) => (
+                <button
+                  key={period.value}
+                  onClick={() => hasAccess && setHistoricalPeriod(period.value as any)}
+                  disabled={!hasAccess}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded transition-all ${
+                    historicalPeriod === period.value
+                      ? "bg-red-600 text-white"
+                      : hasAccess
+                      ? "text-gray-600 hover:text-red-600"
+                      : "text-gray-400 cursor-not-allowed"
+                  }`}
+                >
+                  {period.label}
+                  {!hasAccess && <span className="ml-1">🔒</span>}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {hasAccess ? (
+            <div className="h-64">
+              <Line
+                data={{
+                  labels: historicalExpenseData.labels,
+                  datasets: [{
+                    label: "Total Expenses",
+                    data: historicalExpenseData.data,
+                    borderColor: "#EF4444",
+                    backgroundColor: "rgba(239, 68, 68, 0.1)",
+                    fill: true,
+                    tension: 0.4,
+                    borderWidth: 3,
+                    pointRadius: 3,
+                    pointHoverRadius: 6,
+                    pointBackgroundColor: "#EF4444",
+                  }],
+                }}
+                options={{
+                  responsive: true,
+                  maintainAspectRatio: false,
+                  plugins: { 
+                    legend: { display: false },
+                    tooltip: {
+                      callbacks: {
+                        label: (context) => `${currency.symbol}${context.parsed.y.toLocaleString("en-US", { minimumFractionDigits: 2 })}`,
+                      },
+                    },
+                  },
+                  scales: {
+                    x: { grid: { display: false } },
+                    y: { 
+                      grid: { color: "#F3F4F6" }, 
+                      ticks: { callback: (value) => `${currency.symbol}${value}` } 
+                    },
+                  },
+                }}
+              />
+            </div>
+          ) : (
+            <div className="text-center py-8">
+              <Button
+                onClick={() => router.push("/dashboard/plan")}
+                className="bg-[#22C55E] hover:bg-[#16A34A] text-white rounded-lg font-medium"
+              >
+                Upgrade to Ultra
               </Button>
             </div>
           )}
@@ -793,8 +1130,8 @@ export default function GlobalAnalyticsPage() {
                 datasets: [
                   {
                     data: [
-                      transactions.filter((tx) => tx.type === "expense" && tx.isRecurring).reduce((sum, tx) => sum + tx.amount, 0),
-                      transactions.filter((tx) => tx.type === "expense" && !tx.isRecurring).reduce((sum, tx) => sum + tx.amount, 0),
+                      filteredTransactions.filter((tx) => tx.type === "expense" && tx.isRecurring).reduce((sum, tx) => sum + tx.amount, 0),
+                      filteredTransactions.filter((tx) => tx.type === "expense" && !tx.isRecurring).reduce((sum, tx) => sum + tx.amount, 0),
                     ],
                     backgroundColor: ["#EF4444", "#F59E0B"],
                     borderWidth: 2,
@@ -834,7 +1171,7 @@ export default function GlobalAnalyticsPage() {
     // Calculate average monthly spending per category as "budget"
     const categoryTotals: { [key: string]: { actual: number; count: number } } = {};
     
-    transactions.filter(tx => tx.type === "expense").forEach(tx => {
+    filteredTransactions.filter(tx => tx.type === "expense").forEach(tx => {
       const cat = tx.category || "Uncategorized";
       if (!categoryTotals[cat]) {
         categoryTotals[cat] = { actual: 0, count: 0 };
@@ -1164,8 +1501,8 @@ export default function GlobalAnalyticsPage() {
   const ExpenseWaterfallChart = () => {
     const startBalance = accounts.reduce((sum, acc) => sum + (acc.initialBalance || 0), 0);
     const currentBalance = accounts.reduce((sum, acc) => sum + (acc.currentBalance || 0), 0);
-    const totalIncome = transactions.filter(tx => tx.type === "income").reduce((sum, tx) => sum + tx.amount, 0);
-    const totalExpenses = transactions.filter(tx => tx.type === "expense").reduce((sum, tx) => sum + tx.amount, 0);
+    const totalIncome = filteredTransactions.filter(tx => tx.type === "income").reduce((sum, tx) => sum + tx.amount, 0);
+    const totalExpenses = filteredTransactions.filter(tx => tx.type === "expense").reduce((sum, tx) => sum + tx.amount, 0);
 
     const waterfallData = {
       labels: ["Initial", "Income", "Expenses", "Current"],
@@ -1310,7 +1647,7 @@ export default function GlobalAnalyticsPage() {
     const [flowPeriod, setFlowPeriod] = useState<"month" | "quarter" | "year" | "all">("month");
 
     // Filter transactions based on selected period
-    const getFilteredTransactions = () => {
+    const getFlowTransactions = () => {
       const now = new Date();
       let startDate: Date;
 
@@ -1328,26 +1665,26 @@ export default function GlobalAnalyticsPage() {
           startDate.setFullYear(startDate.getFullYear() - 1);
           break;
         case "all":
-          return transactions;
+          return filteredTransactions;
         default:
           startDate = new Date(now);
           startDate.setMonth(startDate.getMonth() - 1);
       }
 
-      return transactions.filter(tx => {
+      return filteredTransactions.filter(tx => {
         const txDate = tx.date?.toDate ? tx.date.toDate() : new Date(tx.date);
         return txDate >= startDate;
       });
     };
 
-    const filteredTransactions = getFilteredTransactions();
+    const flowTransactions = getFlowTransactions();
 
     // Calculate money flows between different sources/destinations
     const incomeByCategory: { [key: string]: number } = {};
     const expensesByCategory: { [key: string]: number } = {};
     const accountFlows: { [key: string]: { in: number; out: number } } = {};
 
-    filteredTransactions.forEach(tx => {
+    flowTransactions.forEach(tx => {
       if (tx.type === "income") {
         const cat = tx.category || "Other Income";
         incomeByCategory[cat] = (incomeByCategory[cat] || 0) + tx.amount;
@@ -1681,6 +2018,7 @@ export default function GlobalAnalyticsPage() {
 
   const availableCharts: ChartConfig[] = [
     { id: "historical-balance", name: "Historical Balance", description: "Capital evolution timeline", requiredPlan: "free", icon: ClockIcon, component: HistoricalBalanceChart },
+    { id: "historical-expense", name: "Historical Expense", description: "Cumulative expenses over time", requiredPlan: "ultra", icon: ArrowTrendingDownIcon, component: HistoricalExpenseChart },
     { id: "cash-flow", name: "Cash Flow Analyzer", description: "Income vs expenses trends", requiredPlan: "free", icon: ArrowTrendingUpIcon, component: CashFlowChart },
     { id: "fund-allocation", name: "Fund Allocation", description: "Money distribution", requiredPlan: "free", icon: WalletIcon, component: FundAllocationChart },
     { id: "expense-breakdown", name: "Expense Breakdown", description: "Category spending", requiredPlan: "free", icon: TagIcon, component: ExpenseCategoryChart },
@@ -1716,7 +2054,7 @@ export default function GlobalAnalyticsPage() {
     if (!chart) return null;
 
     // Check if this chart should span 2 columns (like Historical Balance)
-    const isWideChart = chartId === "historical-balance";
+    const isWideChart = chartId === "historical-balance" || chartId === "historical-expense";
 
     return (
       <div 
@@ -1850,13 +2188,32 @@ export default function GlobalAnalyticsPage() {
             <h1 className="text-2xl font-semibold text-[#0F172A] mb-1">Global Analytics</h1>
             <p className="text-sm text-gray-500">Comprehensive financial insights</p>
           </div>
-          <Button
-            onClick={() => setShowChartSelector(true)}
-            className="bg-[#0F172A] hover:bg-[#1E293B] text-white rounded-lg font-medium"
-            startContent={<PlusIcon className="w-4 h-4" />}
-          >
-            Manage Charts
-          </Button>
+          <div className="flex items-center gap-4">
+            {/* Shared Accounts Toggle */}
+            {sharedAccounts.length > 0 && (
+              <div className="flex items-center gap-3 px-4 py-2 bg-white rounded-xl border border-gray-200 shadow-sm">
+                <Checkbox
+                  checked={includeSharedAccounts}
+                  onChange={setIncludeSharedAccounts}
+                  className="group relative flex items-center"
+                >
+                  <span className="flex h-5 w-5 items-center justify-center rounded border border-gray-300 bg-white group-data-[checked]:bg-[#22C55E] group-data-[checked]:border-[#22C55E] transition-colors">
+                    <CheckIcon className="h-3 w-3 text-white opacity-0 group-data-[checked]:opacity-100" />
+                  </span>
+                </Checkbox>
+                <label className="text-sm font-medium text-gray-700 cursor-pointer select-none">
+                  Include Shared Accounts
+                </label>
+              </div>
+            )}
+            <Button
+              onClick={() => setShowChartSelector(true)}
+              className="bg-[#0F172A] hover:bg-[#1E293B] text-white rounded-lg font-medium"
+              startContent={<PlusIcon className="w-4 h-4" />}
+            >
+              Manage Charts
+            </Button>
+          </div>
         </div>
       </div>
 

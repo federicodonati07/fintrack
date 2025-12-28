@@ -5,14 +5,17 @@ import { useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { Card, CardBody, Button } from "@heroui/react";
+import AnimatedCounter from "@/components/AnimatedCounter";
 import {
   getUserDocument,
   getAccounts,
   getUserCategories,
   getTransactions,
+  getAllTransactionsIncludingShared,
   getSubAccounts,
   getPlanLimits,
 } from "@/lib/firestore";
+import { getPendingInvites, getSharedAccounts } from "@/lib/sharedAccounts";
 import {
   WalletIcon,
   ChartBarIcon,
@@ -27,6 +30,7 @@ import {
   ArrowUpIcon,
   ArrowDownIcon,
   ArrowsRightLeftIcon,
+  ClockIcon,
 } from "@heroicons/react/24/outline";
 import Toast from "@/components/Toast";
 import { useToast } from "@/hooks/useToast";
@@ -77,6 +81,7 @@ const formatCompactAmount = (value: number, currencySymbol: string): string => {
 export default function Dashboard() {
   const { formatAmount, currency } = useCurrency();
   const [user, setUser] = useState<any>(null);
+  const [userName, setUserName] = useState<string>("");
   const [userPlan, setUserPlan] = useState<Plan>("free");
   const [userInterval, setUserInterval] = useState<"monthly" | "yearly">("monthly");
   const [renewalDate, setRenewalDate] = useState<Date | null>(null);
@@ -87,7 +92,9 @@ export default function Dashboard() {
   const [monthlyExpenses, setMonthlyExpenses] = useState(0);
   const [limits, setLimits] = useState({ accounts: 1, categories: 10 });
   const [isAdmin, setIsAdmin] = useState(false);
+  const [pendingInvitesCount, setPendingInvitesCount] = useState(0);
   const [recentTransactions, setRecentTransactions] = useState<any[]>([]);
+  const [sharedAccounts, setSharedAccounts] = useState<any[]>([]);
   const [monthlyBalanceData, setMonthlyBalanceData] = useState<number[]>([]);
   const [monthlyIncomeData, setMonthlyIncomeData] = useState<number[]>([]);
   const [monthlyExpensesData, setMonthlyExpensesData] = useState<number[]>([]);
@@ -109,6 +116,7 @@ export default function Dashboard() {
         setUserPlan(plan);
         setUserInterval(userDoc?.planInterval || "monthly");
         setIsAdmin(userDoc?.role === "admin");
+        setUserName(userDoc?.name || "");
 
         if (userDoc?.stripeSubscriptionId) {
           const subResponse = await fetch(`/api/stripe/subscription?subscriptionId=${userDoc.stripeSubscriptionId}`);
@@ -131,6 +139,7 @@ export default function Dashboard() {
         setAccountsCount(userAccounts.length);
 
         let total = 0;
+        // Sum regular accounts and their partitions
         for (const account of userAccounts) {
           total += account.currentBalance || 0;
           const subAccounts = await getSubAccounts(currentUser.uid, account.id);
@@ -138,10 +147,39 @@ export default function Dashboard() {
             total += subAccount.balance || 0;
           }
         }
+        
+        // Sum shared accounts
+        try {
+          const sharedAccounts = await getSharedAccounts(currentUser.uid);
+          setSharedAccounts(sharedAccounts);
+          for (const sharedAccount of sharedAccounts) {
+            total += sharedAccount.currentBalance || 0;
+          }
+        } catch (error) {
+          console.error("Error loading shared accounts:", error);
+        }
+        
         setTotalBalance(total);
 
-        const transactions = await getTransactions(currentUser.uid);
-        setRecentTransactions(transactions.slice(0, 5));
+        const transactions = await getAllTransactionsIncludingShared(currentUser.uid);
+        
+        // Filter completed transactions and sort by date (most recent first)
+        const completedTransactions = transactions.filter(t => t.status === "completed" || !t.status);
+        const sortedTransactions = completedTransactions.sort((a, b) => {
+          const dateA = a.date?.toDate ? a.date.toDate() : new Date(a.date);
+          const dateB = b.date?.toDate ? b.date.toDate() : new Date(b.date);
+          return dateB.getTime() - dateA.getTime(); // Descending order (most recent first)
+        });
+        
+        setRecentTransactions(sortedTransactions.slice(0, 5));
+
+        // Load pending invites count
+        try {
+          const invites = await getPendingInvites(currentUser.uid);
+          setPendingInvitesCount(invites.length);
+        } catch (error) {
+          console.error("Error loading pending invites:", error);
+        }
 
         const now = new Date();
         const firstDayOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
@@ -263,7 +301,7 @@ export default function Dashboard() {
           <div>
             <h1 className="text-2xl font-semibold text-[#0F172A] mb-1">Dashboard</h1>
             <p className="text-sm text-gray-500">
-              Welcome back, {user?.displayName || user?.email?.split("@")[0] || "User"}
+              Welcome back, {userName || user?.email?.split("@")[0] || "User"}
             </p>
           </div>
 
@@ -310,7 +348,7 @@ export default function Dashboard() {
           <div className="flex items-center justify-between">
             <div>
               <h2 className="text-xl font-semibold text-[#0F172A] mb-1">
-                Welcome back, {user?.displayName?.split(" ")[0] || "User"}
+                Welcome back, {userName?.split(" ")[0] || "User"}
               </h2>
               <p className="text-sm text-gray-500">
                 Here&apos;s your financial overview for today
@@ -341,7 +379,13 @@ export default function Dashboard() {
               <p className="text-xs font-bold text-white/80 mb-2 uppercase tracking-wider">
                 Total Balance
               </p>
-              <p className="text-3xl font-semibold text-white">{formatCompactAmount(totalBalance, currency.symbol)}</p>
+              <p className="text-3xl font-semibold text-white">
+                <AnimatedCounter
+                  value={totalBalance}
+                  duration={1.25}
+                  formatFn={(val) => formatCompactAmount(val, currency.symbol)}
+                />
+              </p>
               <p className="text-xs text-white/60 mt-1 font-medium">All accounts & partitions</p>
             </CardBody>
           </Card>
@@ -357,7 +401,13 @@ export default function Dashboard() {
               <p className="text-xs font-medium text-gray-500 mb-2 uppercase tracking-wider">
                 Income
               </p>
-              <p className="text-3xl font-semibold text-[#0F172A]">{formatCompactAmount(monthlyIncome, currency.symbol)}</p>
+              <p className="text-3xl font-semibold text-[#0F172A]">
+                <AnimatedCounter
+                  value={monthlyIncome}
+                  duration={1.25}
+                  formatFn={(val) => formatCompactAmount(val, currency.symbol)}
+                />
+              </p>
               <p className="text-xs text-gray-400 mt-1">This month</p>
             </CardBody>
           </Card>
@@ -373,7 +423,13 @@ export default function Dashboard() {
                <p className="text-xs font-medium text-gray-500 mb-2 uppercase tracking-wider">
                  Expenses
                </p>
-               <p className="text-3xl font-semibold text-[#0F172A]">{formatCompactAmount(monthlyExpenses, currency.symbol)}</p>
+               <p className="text-3xl font-semibold text-[#0F172A]">
+                 <AnimatedCounter
+                   value={monthlyExpenses}
+                   duration={1.25}
+                   formatFn={(val) => formatCompactAmount(val, currency.symbol)}
+                 />
+               </p>
                <p className="text-xs text-gray-400 mt-1">This month</p>
              </CardBody>
            </Card>
@@ -390,7 +446,12 @@ export default function Dashboard() {
                 Accounts
               </p>
               <p className="text-3xl font-semibold text-[#0F172A]">
-                {accountsCount}<span className="text-xl text-gray-400">/{limits.accounts === Infinity ? '∞' : limits.accounts}</span>
+                <AnimatedCounter
+                  value={accountsCount}
+                  duration={1.25}
+                  formatFn={(val) => Math.floor(val).toString()}
+                />
+                <span className="text-xl text-gray-400">/{limits.accounts === Infinity ? '∞' : limits.accounts}</span>
               </p>
               <p className="text-xs text-gray-400 mt-1">Active accounts</p>
             </CardBody>
@@ -419,7 +480,12 @@ export default function Dashboard() {
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium text-gray-700">Accounts / Funds</span>
                     <span className="text-sm font-semibold text-[#0F172A]">
-                      {accountsCount} / {limits.accounts === Infinity ? '∞' : limits.accounts}
+                      <AnimatedCounter
+                        value={accountsCount}
+                        duration={1.25}
+                        formatFn={(val) => Math.floor(val).toString()}
+                      />
+                      {' '} / {limits.accounts === Infinity ? '∞' : limits.accounts}
                     </span>
                   </div>
                   <div className="w-full bg-gray-100 rounded-full h-2">
@@ -437,7 +503,12 @@ export default function Dashboard() {
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium text-gray-700">Categories</span>
                     <span className="text-sm font-semibold text-[#0F172A]">
-                      {categoriesCount} / {limits.categories === Infinity ? '∞' : limits.categories}
+                      <AnimatedCounter
+                        value={categoriesCount}
+                        duration={1.25}
+                        formatFn={(val) => Math.floor(val).toString()}
+                      />
+                      {' '} / {limits.categories === Infinity ? '∞' : limits.categories}
                     </span>
                   </div>
                   <div className="w-full bg-gray-100 rounded-full h-2">
@@ -689,23 +760,44 @@ export default function Dashboard() {
               <div className="space-y-3">
                 {recentTransactions.map((transaction) => {
                   const transactionDate = transaction.date?.toDate ? transaction.date.toDate() : new Date(transaction.date);
-                  const TypeIcon = transaction.type === "income" ? ArrowUpIcon : 
+                  const isScheduled = transaction.status === "scheduled";
+                  const TypeIcon = isScheduled ? ClockIcon :
+                                  transaction.type === "income" ? ArrowUpIcon : 
                                   transaction.type === "expense" ? ArrowDownIcon :
                                   ArrowsRightLeftIcon;
-                  const iconBg = transaction.type === "income" ? "bg-[#22C55E]/10" : 
-                                   transaction.type === "expense" ? "bg-red-500/10" : 
-                                   "bg-blue-500/10";
-                  const iconColor = transaction.type === "income" ? "text-[#22C55E]" :
-                                    transaction.type === "expense" ? "text-red-500" :
-                                    "text-blue-500";
+                  const iconBg = isScheduled ? "bg-gray-400/10" :
+                                transaction.type === "income" ? "bg-[#22C55E]/10" : 
+                                transaction.type === "expense" ? "bg-red-500/10" : 
+                                "bg-blue-500/10";
+                  const iconColor = isScheduled ? "text-gray-400" :
+                                   transaction.type === "income" ? "text-[#22C55E]" :
+                                   transaction.type === "expense" ? "text-red-500" :
+                                   "text-blue-500";
                   const amountColor = transaction.type === "income" ? "text-[#22C55E]" :
                                       transaction.type === "expense" ? "text-[#0F172A]" :
                                       "text-[#0F172A]";
 
+                  // Handle both personal and shared accounts
+                  let account;
+                  if (transaction.isSharedAccountTransaction) {
+                    account = {
+                      id: transaction.sharedAccountId,
+                      name: transaction.sharedAccountName,
+                      color: transaction.sharedAccountColor,
+                    };
+                  } else {
+                    // Find in personal or shared accounts based on accountId
+                    const personalAccount = accountsCount > 0; // placeholder check
+                    account = sharedAccounts.find((a) => `shared-${a.id}` === transaction.accountId) || 
+                             { name: "Account", color: "#6B7280" }; // fallback
+                  }
+
                   return (
                     <div
                       key={transaction.id}
-                      className="flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-100 hover:border-gray-200 transition-colors cursor-pointer"
+                      className={`flex items-center justify-between p-4 bg-gray-50 rounded-lg border border-gray-100 hover:border-gray-200 transition-colors cursor-pointer ${
+                        isScheduled ? "opacity-50" : ""
+                      }`}
                       onClick={() => router.push("/dashboard/transactions/all")}
                     >
                       <div className="flex items-center gap-4">
@@ -714,12 +806,20 @@ export default function Dashboard() {
                         </div>
                         <div>
                           <p className="font-medium text-[#0F172A] text-sm mb-0.5">{transaction.description}</p>
-                          <p className="text-xs text-gray-500">
-                            {transactionDate.toLocaleDateString("en-US", { 
-                              month: "short", 
-                              day: "numeric"
-                            })}
-                          </p>
+                          <div className="flex items-center gap-2">
+                            <span 
+                              className="text-xs font-medium text-white px-2 py-0.5 rounded"
+                              style={{ backgroundColor: account?.color || "#6B7280" }}
+                            >
+                              {account?.name}
+                            </span>
+                            <span className="text-xs text-gray-500">
+                              {transactionDate.toLocaleDateString("en-US", { 
+                                month: "short", 
+                                day: "numeric"
+                              })}
+                            </span>
+                          </div>
                         </div>
                       </div>
                       <p className={`text-base font-semibold ${amountColor}`}>

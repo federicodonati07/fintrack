@@ -11,6 +11,7 @@ export type TransactionStatus = "completed" | "scheduled" | "cancelled";
 export type InterestFrequency = "daily" | "monthly" | "yearly";
 export type AssetType = "etf" | "bond" | "stock";
 export type SubAccountType = "savings" | "investment";
+export type SharedAccountInviteStatus = "pending" | "accepted" | "rejected";
 
 export interface User {
   uid: string;
@@ -22,6 +23,7 @@ export interface User {
   planInterval: PlanInterval;
   stripeCustomerId: string;
   stripeSubscriptionId: string;
+  allowSharedAccountDiscovery?: boolean; // Privacy setting for shared account search (default: false)
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }
@@ -52,6 +54,7 @@ export interface Transaction {
   amount: number;
   accountId: string; // Main account for income/expense, source for transfer
   toAccountId?: string; // Only for transfers
+  sharedAccountId?: string; // Shared account ID (if transaction is for a shared account)
   category?: string; // Category ID for expenses, income category for income
   incomeCategory?: IncomeCategory; // Specific category for income
   description: string;
@@ -240,6 +243,8 @@ export interface PlanLimits {
     categories: number;
     goals: number;
     automations: number;
+    sharedAccounts: number; // Max shared accounts user can participate in
+    maxMembersPerSharedAccount: number; // Max members per each shared account
   };
   features: string[];
   updatedAt: Timestamp;
@@ -254,6 +259,44 @@ export interface PromoCode {
   currentUses: number;
   applicablePlans: PlanType[];
   active: boolean;
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+// Shared Account (Conto Congiunto)
+export interface SharedAccount {
+  id: string;
+  name: string;
+  description: string;
+  type: "checking" | "savings" | "investment" | "wallet" | "credit_card" | "other";
+  currentBalance: number;
+  currency: string;
+  iban?: string;
+  bic?: string;
+  color?: string;
+  icon?: string;
+  archived: boolean;
+  
+  // Members management
+  members: Array<{ userId: string; email: string; role: "owner" | "member" }>; // Max 10 members
+  ownerId: string; // User ID of the creator/owner (for permissions)
+  
+  // Metadata
+  createdAt: Timestamp;
+  updatedAt: Timestamp;
+}
+
+// Shared Account Invite
+export interface SharedAccountInvite {
+  id: string;
+  sharedAccountId: string;
+  sharedAccountName: string;
+  inviterUserId: string;
+  inviterEmail: string;
+  inviterName: string;
+  invitedUserId: string;
+  invitedEmail: string;
+  status: SharedAccountInviteStatus;
   createdAt: Timestamp;
   updatedAt: Timestamp;
 }

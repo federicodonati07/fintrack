@@ -125,10 +125,21 @@ export default function AdminPage() {
       const hasLimits = Object.keys(limitsData).length > 0;
       setLimitsInitialized(hasLimits);
       
-      // Initialize edited limits with current values
+      // Initialize edited limits with current values, ensuring all fields exist
       const initialEdited: Record<string, PlanLimits["limits"]> = {};
+      const defaultLimitsMap = {
+        free: { accounts: 1, categories: 10, sharedAccounts: 0, maxMembersPerSharedAccount: 0 },
+        pro: { accounts: 3, categories: 15, sharedAccounts: 3, maxMembersPerSharedAccount: 5 },
+        ultra: { accounts: 10, categories: 50, sharedAccounts: 5, maxMembersPerSharedAccount: 10 },
+        admin: { accounts: 999, categories: 999, sharedAccounts: 999, maxMembersPerSharedAccount: 999 },
+      };
+      
       Object.entries(limitsData).forEach(([plan, data]) => {
-        initialEdited[plan] = { ...data.limits };
+        // Merge with defaults to ensure all fields exist
+        initialEdited[plan] = {
+          ...defaultLimitsMap[plan as keyof typeof defaultLimitsMap],
+          ...data.limits,
+        };
       });
       setEditedLimits(initialEdited);
       
@@ -294,9 +305,9 @@ export default function AdminPage() {
           data: sortedCounts,
           backgroundColor: [
             "#94A3B8", // Free - Gray
-            "#3B82F6", // Pro - Blue
-            "#22C55E", // Ultra - Green
-            "#A855F7", // Admin - Purple
+            "#22C55E", // Pro - Green
+            "#D946EF", // Ultra - Magenta
+            "#3B82F6", // Admin - Blue
           ],
           borderColor: "#ffffff",
           borderWidth: 4,
@@ -771,13 +782,19 @@ export default function AdminPage() {
                         <div className="p-5 flex-1">
                           <div className="grid grid-cols-2 gap-4">
                             {editedLimits[planName] &&
-                              Object.entries(editedLimits[planName]).map(([key, value]) => (
+                              Object.entries(editedLimits[planName])
+                                .filter(([key]) => key !== "goals" && key !== "automations")
+                                .map(([key, value]) => (
                                 <div key={key} className="space-y-1.5">
                                   <label
                                     htmlFor={`${planName}-${key}`}
                                     className="block text-xs font-semibold text-[#0F172A] capitalize"
                                   >
-                                    {key}
+                                    {key === "sharedAccounts" 
+                                      ? "Shared Accounts" 
+                                      : key === "maxMembersPerSharedAccount"
+                                      ? "Max Members/Shared"
+                                      : key}
                                   </label>
                                   <input
                                     id={`${planName}-${key}`}
@@ -790,7 +807,7 @@ export default function AdminPage() {
                                     min="0"
                                   />
                                   <p className="text-[10px] text-gray-500">
-                                    Current: <span className="font-semibold">{plan.limits[key as keyof typeof plan.limits]}</span>
+                                    Current: <span className="font-semibold">{plan.limits[key as keyof typeof plan.limits] ?? "N/A"}</span>
                                   </p>
                                 </div>
                               ))}

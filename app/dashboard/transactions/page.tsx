@@ -9,11 +9,15 @@ import {
   getAccounts,
   createTransaction,
   getTransactions,
+  getAllTransactionsIncludingShared,
   getUserCategories,
   deleteTransaction,
 } from "@/lib/firestore";
-import { User, Account, Category, Transaction } from "@/lib/types";
+import { getSharedAccountsByMember } from "@/lib/sharedAccounts";
+import { User, Account, Category, Transaction, SharedAccount } from "@/lib/types";
 import { Button } from "@heroui/react";
+import { Dialog, Transition } from "@headlessui/react";
+import { Fragment } from "react";
 import {
   PlusIcon,
   ArrowUpIcon,
@@ -26,6 +30,7 @@ import {
   ClockIcon,
   CheckIcon,
   TrashIcon,
+  ExclamationTriangleIcon,
 } from "@heroicons/react/24/outline";
 import { useToast } from "@/hooks/useToast";
 import { useCurrency } from "@/contexts/CurrencyContext";
@@ -49,14 +54,18 @@ export default function TransactionsPage() {
   const { showToast } = useToast();
   const { formatAmount, currency } = useCurrency();
   const [loading, setLoading] = useState(true);
+  const [isCreating, setIsCreating] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [sharedAccounts, setSharedAccounts] = useState<SharedAccount[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [recentTransactions, setRecentTransactions] = useState<any[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [transactionType, setTransactionType] = useState<"income" | "expense" | "transfer">("income");
   const [showDetailModal, setShowDetailModal] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState<any | null>(null);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [transactionToDelete, setTransactionToDelete] = useState<any | null>(null);
 
   const [formData, setFormData] = useState({
     amount: 0,
@@ -65,7 +74,7 @@ export default function TransactionsPage() {
     category: "",
     incomeCategory: "salary",
     description: "",
-    date: new Date().toISOString().split("T")[0],
+    date: new Date().toISOString().split("T")[0], // yyyy-mm-dd for input type="date"
     isRecurring: false,
     recurringInterval: "monthly" as "daily" | "weekly" | "monthly" | "yearly",
   });
@@ -86,13 +95,33 @@ export default function TransactionsPage() {
           const userAccounts = await getAccounts(firebaseUser.uid);
           setAccounts(userAccounts);
           
+          // Load shared accounts
+          const userSharedAccounts = await getSharedAccountsByMember(firebaseUser.uid);
+          setSharedAccounts(userSharedAccounts);
+          
           // Load categories
           const userCategories = await getUserCategories(firebaseUser.uid);
           setCategories(userCategories);
           
-          // Load recent transactions
-          const transactions = await getTransactions(firebaseUser.uid);
-          setRecentTransactions(transactions.slice(0, 5));
+          // Load recent transactions (only completed, not scheduled)
+          const transactions = await getAllTransactionsIncludingShared(firebaseUser.uid);
+          
+          // Filter completed transactions and sort by date (most recent first)
+          const completedTransactions = transactions.filter(t => t.status === "completed" || !t.status);
+          const sortedTransactions = completedTransactions.sort((a, b) => {
+            const dateA = a.date?.toDate ? a.date.toDate() : new Date(a.date);
+            const dateB = b.date?.toDate ? b.date.toDate() : new Date(b.date);
+            return dateB.getTime() - dateA.getTime(); // Descending order (most recent first)
+          });
+          
+          // Debug: Log sorted transactions
+          console.log("Recent transactions sorted:", sortedTransactions.slice(0, 5).map(t => ({
+            desc: t.description,
+            date: t.date?.toDate ? t.date.toDate() : new Date(t.date),
+            timestamp: (t.date?.toDate ? t.date.toDate() : new Date(t.date)).getTime()
+          })));
+          
+          setRecentTransactions(sortedTransactions.slice(0, 5));
         }
       } catch (error) {
         console.error("Error loading data:", error);
@@ -113,14 +142,14 @@ export default function TransactionsPage() {
       category: "",
       incomeCategory: "salary",
       description: "",
-      date: new Date().toISOString().split("T")[0],
+      date: new Date().toISOString().split("T")[0], // yyyy-mm-dd for input type="date"
       isRecurring: false,
       recurringInterval: "monthly",
     });
   };
 
   const handleCreateTransaction = async () => {
-    if (!user) return;
+    if (!user || isCreating) return;
 
     // Validation
     if (formData.amount <= 0) {
@@ -148,16 +177,27 @@ export default function TransactionsPage() {
       return;
     }
 
+    setIsCreating(true);
     try {
+      // Keep shared- prefix for proper handling in backend
       await createTransaction(user.uid, {
         type: transactionType,
         amount: formData.amount,
-        accountId: formData.accountId,
+        accountId: formData.accountId, // Keep shared- prefix if present
         toAccountId: transactionType === "transfer" ? formData.toAccountId : undefined,
         category: transactionType === "expense" ? formData.category : transactionType === "income" ? formData.incomeCategory : undefined,
         incomeCategory: transactionType === "income" ? formData.incomeCategory as any : undefined,
         description: formData.description,
-        date: new Date(formData.date),
+        date: (() => {
+          // Parse yyyy-mm-dd from date input and combine with current time for precise ordering
+          const selectedDate = new Date(formData.date);
+          const now = new Date();
+          selectedDate.setHours(now.getHours());
+          selectedDate.setMinutes(now.getMinutes());
+          selectedDate.setSeconds(now.getSeconds());
+          selectedDate.setMilliseconds(now.getMilliseconds());
+          return selectedDate;
+        })(),
         isRecurring: formData.isRecurring,
         recurringInterval: formData.isRecurring ? formData.recurringInterval : undefined,
       });
@@ -165,8 +205,19 @@ export default function TransactionsPage() {
       // Reload data
       const userAccounts = await getAccounts(user.uid);
       setAccounts(userAccounts);
-      const transactions = await getTransactions(user.uid);
-      setRecentTransactions(transactions.slice(0, 5));
+      const userSharedAccounts = await getSharedAccountsByMember(user.uid);
+      setSharedAccounts(userSharedAccounts);
+      const transactions = await getAllTransactionsIncludingShared(user.uid);
+      
+      // Filter completed transactions and sort by date (most recent first)
+      const completedTransactions = transactions.filter(t => t.status === "completed" || !t.status);
+      const sortedTransactions = completedTransactions.sort((a, b) => {
+        const dateA = a.date?.toDate ? a.date.toDate() : new Date(a.date);
+        const dateB = b.date?.toDate ? b.date.toDate() : new Date(b.date);
+        return dateB.getTime() - dateA.getTime(); // Descending order (most recent first)
+      });
+      
+      setRecentTransactions(sortedTransactions.slice(0, 5));
 
       setShowForm(false);
       resetForm();
@@ -174,6 +225,8 @@ export default function TransactionsPage() {
     } catch (error: any) {
       console.error("Error creating transaction:", error);
       showToast(`❌ ${error.message || "Error creating transaction"}`, "error");
+    } finally {
+      setIsCreating(false);
     }
   };
 
@@ -198,26 +251,50 @@ export default function TransactionsPage() {
     setSelectedTransaction(null);
   };
 
-  const handleDeleteTransaction = async (transactionId: string) => {
-    if (!user) return;
+  const openDeleteModal = (transaction: any) => {
+    setTransactionToDelete(transaction);
+    setShowDeleteModal(true);
+  };
 
-    if (!confirm("Are you sure you want to delete this transaction? This will reverse its effects on your account balances.")) {
-      return;
-    }
+  const closeDeleteModal = () => {
+    setTransactionToDelete(null);
+    setShowDeleteModal(false);
+  };
+
+  const confirmDeleteTransaction = async () => {
+    if (!user || !transactionToDelete) return;
 
     try {
-      await deleteTransaction(user.uid, transactionId);
+      await deleteTransaction(user.uid, transactionToDelete.id);
       
       // Reload data
       const userAccounts = await getAccounts(user.uid);
       setAccounts(userAccounts);
       const transactions = await getTransactions(user.uid);
-      setRecentTransactions(transactions.slice(0, 5));
       
+      // Filter completed transactions and sort by date (most recent first)
+      const completedTransactions = transactions.filter(t => t.status === "completed" || !t.status);
+      const sortedTransactions = completedTransactions.sort((a, b) => {
+        const dateA = a.date?.toDate ? a.date.toDate() : new Date(a.date);
+        const dateB = b.date?.toDate ? b.date.toDate() : new Date(b.date);
+        return dateB.getTime() - dateA.getTime(); // Descending order (most recent first)
+      });
+      
+      setRecentTransactions(sortedTransactions.slice(0, 5));
+      
+      closeDeleteModal();
       showToast("✅ Transaction deleted successfully!", "success");
     } catch (error: any) {
       console.error("Error deleting transaction:", error);
       showToast(`❌ ${error.message || "Error deleting transaction"}`, "error");
+    }
+  };
+
+  const handleDeleteTransaction = async (transactionId: string) => {
+    if (!user) return;
+    const transaction = recentTransactions.find(t => t.id === transactionId);
+    if (transaction) {
+      openDeleteModal(transaction);
     }
   };
 
@@ -325,26 +402,57 @@ export default function TransactionsPage() {
                 ) : (
                   <div className="space-y-3">
                     {recentTransactions.map((transaction) => {
-                      const account = accounts.find((a) => a.id === transaction.accountId);
-                      const toAccount = accounts.find((a) => a.id === transaction.toAccountId);
+                      // Handle both personal and shared accounts
+                      let account, toAccount;
+                      if (transaction.isSharedAccountTransaction) {
+                        // For shared account transactions, use stored info
+                        account = {
+                          id: transaction.sharedAccountId,
+                          name: transaction.sharedAccountName,
+                          color: transaction.sharedAccountColor,
+                        };
+                        if (transaction.toAccountId?.startsWith("shared-")) {
+                          const toSharedAccount = sharedAccounts.find((a) => `shared-${a.id}` === transaction.toAccountId);
+                          toAccount = toSharedAccount ? {
+                            id: toSharedAccount.id,
+                            name: toSharedAccount.name,
+                            color: toSharedAccount.color,
+                          } : null;
+                        } else {
+                          toAccount = accounts.find((a) => a.id === transaction.toAccountId);
+                        }
+                      } else {
+                        account = accounts.find((a) => a.id === transaction.accountId) || 
+                                 sharedAccounts.find((a) => `shared-${a.id}` === transaction.accountId);
+                        toAccount = accounts.find((a) => a.id === transaction.toAccountId) ||
+                                   sharedAccounts.find((a) => `shared-${a.id}` === transaction.toAccountId);
+                      }
+                      
                       const category = categories.find((c) => c.name === transaction.category);
+                      const isScheduled = transaction.status === "scheduled";
                       
                       return (
                         <div
                           key={transaction.id}
                           onClick={() => openTransactionDetail(transaction)}
-                          className="group flex items-center gap-4 p-4 bg-gray-50 rounded-lg border border-gray-100 hover:border-gray-200 hover:shadow-sm transition-all duration-200 cursor-pointer"
+                          className={`group flex items-center gap-4 p-4 bg-gray-50 rounded-lg border border-gray-100 hover:border-gray-200 hover:shadow-sm transition-all duration-200 cursor-pointer ${
+                            isScheduled ? "opacity-50" : ""
+                          }`}
                         >
                           <div
                             className={`w-12 h-12 rounded-lg flex items-center justify-center ${
-                              transaction.type === "income"
+                              isScheduled
+                                ? "bg-gray-400/10"
+                                : transaction.type === "income"
                                 ? "bg-[#22C55E]/10"
                                 : transaction.type === "expense"
                                 ? "bg-red-500/10"
                                 : "bg-blue-500/10"
                             }`}
                           >
-                            {transaction.type === "income" ? (
+                            {isScheduled ? (
+                              <ClockIcon className="w-6 h-6 text-gray-400" />
+                            ) : transaction.type === "income" ? (
                               <ArrowUpIcon className="w-6 h-6 text-[#22C55E]" />
                             ) : transaction.type === "expense" ? (
                               <ArrowDownIcon className="w-6 h-6 text-red-600" />
@@ -488,11 +596,24 @@ export default function TransactionsPage() {
                     className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all"
                   >
                     <option value="">Select account...</option>
-                    {activeAccounts.map((account) => (
-                      <option key={account.id} value={account.id}>
-                        {account.name} ({formatAmount(account.currentBalance)})
-                      </option>
-                    ))}
+                    {activeAccounts.length > 0 && (
+                      <optgroup label="My Accounts">
+                        {activeAccounts.map((account) => (
+                          <option key={account.id} value={account.id}>
+                            {account.name} ({formatAmount(account.currentBalance)})
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {sharedAccounts.length > 0 && (
+                      <optgroup label="Shared Accounts">
+                        {sharedAccounts.map((account) => (
+                          <option key={`shared-${account.id}`} value={`shared-${account.id}`}>
+                            👥 {account.name} ({formatAmount(account.currentBalance)})
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
                   </select>
                 </div>
 
@@ -508,13 +629,28 @@ export default function TransactionsPage() {
                       className="w-full px-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
                     >
                       <option value="">Select account...</option>
-                      {activeAccounts
-                        .filter((a) => a.id !== formData.accountId)
-                        .map((account) => (
-                          <option key={account.id} value={account.id}>
-                            {account.name} ({formatAmount(account.currentBalance)})
-                          </option>
-                        ))}
+                      {activeAccounts.length > 0 && (
+                        <optgroup label="My Accounts">
+                          {activeAccounts
+                            .filter((a) => a.id !== formData.accountId)
+                            .map((account) => (
+                              <option key={account.id} value={account.id}>
+                                {account.name} ({formatAmount(account.currentBalance)})
+                              </option>
+                            ))}
+                        </optgroup>
+                      )}
+                      {sharedAccounts.length > 0 && (
+                        <optgroup label="Shared Accounts">
+                          {sharedAccounts
+                            .filter((a) => `shared-${a.id}` !== formData.accountId)
+                            .map((account) => (
+                              <option key={`shared-${account.id}`} value={`shared-${account.id}`}>
+                                👥 {account.name} ({formatAmount(account.currentBalance)})
+                              </option>
+                            ))}
+                        </optgroup>
+                      )}
                     </select>
                   </div>
                 )}
@@ -603,14 +739,22 @@ export default function TransactionsPage() {
                     Date *
                   </label>
                   <div className="relative">
-                    <CalendarIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
+                    <CalendarIcon className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400 pointer-events-none z-10" />
                     <input
                       type="date"
                       value={formData.date}
                       onChange={(e) => setFormData({ ...formData, date: e.target.value })}
-                      className="w-full pl-12 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all"
+                      className="w-full pl-12 pr-4 py-3 bg-gray-50 border-2 border-gray-200 rounded-xl text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all [&::-webkit-calendar-picker-indicator]:opacity-100 [&::-webkit-calendar-picker-indicator]:cursor-pointer"
+                      style={{
+                        colorScheme: 'light'
+                      }}
                     />
                   </div>
+                  {formData.date && (
+                    <p className="text-xs text-gray-500 mt-1">
+                      Selected: {new Date(formData.date + 'T00:00:00').toLocaleDateString('en-GB')}
+                    </p>
+                  )}
                 </div>
 
                 {/* Recurring */}
@@ -665,13 +809,15 @@ export default function TransactionsPage() {
                 <div className="flex gap-3 pt-4">
                   <button
                     onClick={closeForm}
-                    className="flex-1 px-6 py-3 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors"
+                    disabled={isCreating}
+                    className="flex-1 px-6 py-3 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
                   >
                     Cancel
                   </button>
                   <button
                     onClick={handleCreateTransaction}
-                    className={`flex-1 px-6 py-3 text-white rounded-lg font-medium transition-colors ${
+                    disabled={isCreating}
+                    className={`flex-1 px-6 py-3 text-white rounded-lg font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
                       transactionType === "income"
                         ? "bg-[#22C55E] hover:bg-[#16A34A]"
                         : transactionType === "expense"
@@ -679,7 +825,17 @@ export default function TransactionsPage() {
                         : "bg-blue-600 hover:bg-blue-700"
                     }`}
                   >
-                    {transactionType === "transfer" ? "Transfer" : "Create Transaction"}
+                    {isCreating ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <svg className="animate-spin h-5 w-5" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        {transactionType === "transfer" ? "Transferring..." : "Creating..."}
+                      </span>
+                    ) : (
+                      transactionType === "transfer" ? "Transfer" : "Create Transaction"
+                    )}
                   </button>
                 </div>
               </div>
@@ -835,6 +991,119 @@ export default function TransactionsPage() {
           </div>
         </div>
       )}
+
+      {/* Delete Confirmation Modal */}
+      <Transition appear show={showDeleteModal} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={closeDeleteModal}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-300"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-200"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" />
+          </Transition.Child>
+
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center p-4">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-300"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-200"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-lg bg-white shadow-xl transition-all">
+                  {/* Header */}
+                  <div className="bg-red-600 px-6 py-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex-shrink-0">
+                        <ExclamationTriangleIcon className="w-6 h-6 text-white" />
+                      </div>
+                      <Dialog.Title className="text-lg font-semibold text-white">
+                        Delete Transaction
+                      </Dialog.Title>
+                    </div>
+                  </div>
+
+                  {/* Content */}
+                  <div className="px-6 py-5">
+                    <p className="text-sm text-gray-600 mb-4">
+                      Are you sure you want to delete this transaction? This action will:
+                    </p>
+                    <ul className="space-y-2 mb-4">
+                      <li className="flex items-start gap-2 text-sm text-gray-600">
+                        <span className="text-red-500 font-bold">•</span>
+                        <span>Reverse its effects on your account balances</span>
+                      </li>
+                      <li className="flex items-start gap-2 text-sm text-gray-600">
+                        <span className="text-red-500 font-bold">•</span>
+                        <span>Permanently remove the transaction record</span>
+                      </li>
+                      <li className="flex items-start gap-2 text-sm text-gray-600">
+                        <span className="text-red-500 font-bold">•</span>
+                        <span>Cannot be undone</span>
+                      </li>
+                    </ul>
+
+                    {transactionToDelete && (
+                      <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                        <p className="text-sm font-semibold text-gray-900 mb-1">
+                          {transactionToDelete.description}
+                        </p>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-gray-500">
+                            {transactionToDelete.date?.toDate
+                              ? transactionToDelete.date.toDate().toLocaleDateString("en-GB")
+                              : new Date(transactionToDelete.date).toLocaleDateString("en-GB")}
+                          </span>
+                          <span
+                            className={`text-sm font-bold ${
+                              transactionToDelete.type === "income"
+                                ? "text-green-600"
+                                : transactionToDelete.type === "expense"
+                                ? "text-red-600"
+                                : "text-blue-600"
+                            }`}
+                          >
+                            {transactionToDelete.type === "expense"
+                              ? "-"
+                              : transactionToDelete.type === "income"
+                              ? "+"
+                              : ""}
+                            {formatAmount(transactionToDelete.amount)}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex gap-3 px-6 pb-5">
+                    <button
+                      onClick={closeDeleteModal}
+                      className="flex-1 px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={confirmDeleteTransaction}
+                      className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors"
+                    >
+                      Delete Transaction
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
     </div>
   );
 }

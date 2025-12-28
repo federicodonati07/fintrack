@@ -459,6 +459,8 @@ function getDefaultLimits(plan: "free" | "pro" | "ultra" | "admin"): PlanLimits[
         categories: 999,
         goals: 999,
         automations: 999,
+        sharedAccounts: 999,
+        maxMembersPerSharedAccount: 999,
       };
     case "ultra":
       return {
@@ -466,6 +468,8 @@ function getDefaultLimits(plan: "free" | "pro" | "ultra" | "admin"): PlanLimits[
         categories: 50,
         goals: 20,
         automations: 20,
+        sharedAccounts: 5,
+        maxMembersPerSharedAccount: 10,
       };
     case "pro":
       return {
@@ -473,6 +477,8 @@ function getDefaultLimits(plan: "free" | "pro" | "ultra" | "admin"): PlanLimits[
         categories: 15,
         goals: 10,
         automations: 10,
+        sharedAccounts: 3,
+        maxMembersPerSharedAccount: 5,
       };
     default: // free
       return {
@@ -480,6 +486,8 @@ function getDefaultLimits(plan: "free" | "pro" | "ultra" | "admin"): PlanLimits[
         categories: 10,
         goals: 3,
         automations: 2,
+        sharedAccounts: 0,
+        maxMembersPerSharedAccount: 0,
       };
   }
 }
@@ -559,8 +567,19 @@ export async function updatePlanLimits(
   limits: Partial<PlanLimits["limits"]>
 ): Promise<void> {
   const limitsRef = doc(db, "planLimits", plan);
+  
+  // Get current limits first
+  const currentDoc = await getDoc(limitsRef);
+  const currentLimits = currentDoc.exists() ? currentDoc.data().limits : {};
+  
+  // Merge with new limits
+  const updatedLimits = {
+    ...currentLimits,
+    ...limits,
+  };
+  
   await updateDoc(limitsRef, {
-    limits,
+    limits: updatedLimits,
     updatedAt: serverTimestamp(),
   });
 }
@@ -832,7 +851,7 @@ export async function deleteAccount(userId: string, accountId: string) {
 }
 
 /**
- * Update account balance
+ * Update account balance (supports both personal and shared accounts)
  */
 export async function updateAccountBalance(
   userId: string,
@@ -840,6 +859,28 @@ export async function updateAccountBalance(
   amount: number,
   type: "add" | "subtract"
 ) {
+  // Check if it's a shared account
+  if (accountId.startsWith("shared-")) {
+    const sharedAccountId = accountId.replace("shared-", "");
+    const accountRef = doc(db, "sharedAccounts", sharedAccountId);
+    const accountSnap = await getDoc(accountRef);
+    
+    if (!accountSnap.exists()) {
+      throw new Error("Shared account not found");
+    }
+    
+    const currentBalance = accountSnap.data().currentBalance || 0;
+    const newBalance = type === "add" ? currentBalance + amount : currentBalance - amount;
+    
+    await updateDoc(accountRef, {
+      currentBalance: newBalance,
+      updatedAt: serverTimestamp(),
+    });
+    
+    return newBalance;
+  }
+  
+  // Personal account
   const accountRef = doc(db, "users", userId, "accounts", accountId);
   const accountSnap = await getDoc(accountRef);
   
@@ -859,7 +900,7 @@ export async function updateAccountBalance(
 }
 
 /**
- * Transfer funds between accounts
+ * Transfer funds between accounts (supports both personal and shared accounts)
  */
 export async function transferBetweenAccounts(
   userId: string,
@@ -871,9 +912,17 @@ export async function transferBetweenAccounts(
     throw new Error("Amount must be positive");
   }
   
-  // Get both accounts
-  const fromAccountRef = doc(db, "users", userId, "accounts", fromAccountId);
-  const toAccountRef = doc(db, "users", userId, "accounts", toAccountId);
+  // Determine account types and get references
+  const fromIsShared = fromAccountId.startsWith("shared-");
+  const toIsShared = toAccountId.startsWith("shared-");
+  
+  const fromAccountRef = fromIsShared
+    ? doc(db, "sharedAccounts", fromAccountId.replace("shared-", ""))
+    : doc(db, "users", userId, "accounts", fromAccountId);
+    
+  const toAccountRef = toIsShared
+    ? doc(db, "sharedAccounts", toAccountId.replace("shared-", ""))
+    : doc(db, "users", userId, "accounts", toAccountId);
   
   const fromAccountSnap = await getDoc(fromAccountRef);
   const toAccountSnap = await getDoc(toAccountRef);
@@ -1234,21 +1283,29 @@ export async function createTransaction(
   const transactionsRef = collection(db, "users", userId, "transactions");
   const newTransactionRef = doc(transactionsRef);
 
-  // If it's a transfer, update both accounts and create the transaction
-  if (transactionData.type === "transfer" && transactionData.toAccountId) {
-    // Use the existing transferBetweenAccounts function
-    await transferBetweenAccounts(
-      userId,
-      transactionData.accountId,
-      transactionData.toAccountId,
-      transactionData.amount
-    );
-  } else if (transactionData.type === "income") {
-    // Add to account balance
-    await updateAccountBalance(userId, transactionData.accountId, transactionData.amount, "add");
-  } else if (transactionData.type === "expense") {
-    // Subtract from account balance
-    await updateAccountBalance(userId, transactionData.accountId, transactionData.amount, "subtract");
+  // Determine if transaction is scheduled (future date) or completed
+  const now = new Date();
+  const transactionDate = new Date(transactionData.date);
+  const isScheduled = transactionDate > now;
+  const status = isScheduled ? "scheduled" : "completed";
+
+  // Only update account balances if transaction is not scheduled
+  if (!isScheduled) {
+    if (transactionData.type === "transfer" && transactionData.toAccountId) {
+      // Use the existing transferBetweenAccounts function
+      await transferBetweenAccounts(
+        userId,
+        transactionData.accountId,
+        transactionData.toAccountId,
+        transactionData.amount
+      );
+    } else if (transactionData.type === "income") {
+      // Add to account balance
+      await updateAccountBalance(userId, transactionData.accountId, transactionData.amount, "add");
+    } else if (transactionData.type === "expense") {
+      // Subtract from account balance
+      await updateAccountBalance(userId, transactionData.accountId, transactionData.amount, "subtract");
+    }
   }
 
   // Calculate next scheduled date if recurring
@@ -1282,7 +1339,7 @@ export async function createTransaction(
     incomeCategory: transactionData.incomeCategory || null,
     description: transactionData.description,
     date: Timestamp.fromDate(transactionData.date),
-    status: "completed",
+    status: status,
     isRecurring: transactionData.isRecurring,
     recurringInterval: transactionData.recurringInterval || null,
     nextScheduledDate: nextScheduledDate,
@@ -1298,6 +1355,7 @@ export async function createTransaction(
  */
 export async function getTransactions(userId: string): Promise<any[]> {
   const transactionsRef = collection(db, "users", userId, "transactions");
+  // Order by date only - full sorting will be done client-side
   const q = query(transactionsRef, orderBy("date", "desc"));
   const snapshot = await getDocs(q);
 
@@ -1305,6 +1363,195 @@ export async function getTransactions(userId: string): Promise<any[]> {
     id: doc.id,
     ...doc.data(),
   }));
+}
+
+/**
+ * Get all transactions including shared accounts
+ */
+export async function getAllTransactionsIncludingShared(userId: string): Promise<any[]> {
+  // Get personal transactions
+  const personalTransactions = await getTransactions(userId);
+  console.log(`[getAllTransactionsIncludingShared] Personal transactions: ${personalTransactions.length}`);
+  
+  // Get shared accounts the user is part of
+  const sharedAccountsRef = collection(db, "sharedAccounts");
+  const sharedAccountsSnapshot = await getDocs(sharedAccountsRef);
+  
+  const userSharedAccounts = sharedAccountsSnapshot.docs
+    .map(doc => ({ id: doc.id, ...doc.data() }))
+    .filter((account: any) => account.members?.some((m: any) => m.userId === userId));
+  
+  console.log(`[getAllTransactionsIncludingShared] User shared accounts: ${userSharedAccounts.length}`);
+  
+  // Get transactions from all members of shared accounts
+  const sharedTransactionsPromises = userSharedAccounts.flatMap((sharedAccount: any) => {
+    // For each member of the shared account, get their transactions involving this account
+    return sharedAccount.members.map(async (member: any) => {
+      const memberTransactionsRef = collection(db, "users", member.userId, "transactions");
+      const snapshot = await getDocs(memberTransactionsRef);
+      
+      // Filter transactions that involve this shared account
+      return snapshot.docs
+        .map((doc) => ({ id: doc.id, ...doc.data() }))
+        .filter((tx: any) => {
+          const accountMatches = tx.accountId === `shared-${sharedAccount.id}`;
+          const toAccountMatches = tx.toAccountId === `shared-${sharedAccount.id}`;
+          return accountMatches || toAccountMatches;
+        })
+        .map((tx: any) => ({
+          ...tx,
+          isSharedAccountTransaction: true,
+          sharedAccountId: sharedAccount.id,
+          sharedAccountName: sharedAccount.name,
+          sharedAccountColor: sharedAccount.color,
+        }));
+    });
+  });
+  
+  const sharedTransactionsArrays = await Promise.all(sharedTransactionsPromises);
+  const sharedTransactions = sharedTransactionsArrays.flat();
+  
+  console.log(`[getAllTransactionsIncludingShared] Total shared transactions found: ${sharedTransactions.length}`);
+  
+  // Remove duplicates (same transaction might be in multiple member's collections)
+  const uniqueSharedTransactions = Array.from(
+    new Map(sharedTransactions.map(tx => [tx.id, tx])).values()
+  );
+  
+  console.log(`[getAllTransactionsIncludingShared] Unique shared transactions: ${uniqueSharedTransactions.length}`);
+  
+  // Combine all transactions
+  const allTransactions = [...personalTransactions, ...uniqueSharedTransactions];
+  
+  // Final deduplication - remove any transaction that appears in both personal and shared
+  // (happens when current user made a transaction on a shared account)
+  const finalUniqueTransactions = Array.from(
+    new Map(allTransactions.map(tx => [tx.id, tx])).values()
+  );
+  
+  console.log(`[getAllTransactionsIncludingShared] Final unique transactions: ${finalUniqueTransactions.length}`);
+  
+  return finalUniqueTransactions;
+}
+
+/**
+ * Get scheduled transactions (future date or recurring)
+ */
+export async function getScheduledTransactions(userId: string): Promise<any[]> {
+  const transactionsRef = collection(db, "users", userId, "transactions");
+  // Only filter by status, sort client-side to avoid composite index requirement
+  const q = query(
+    transactionsRef, 
+    where("status", "==", "scheduled")
+  );
+  const snapshot = await getDocs(q);
+
+  const transactions = snapshot.docs.map((doc) => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+
+  // Sort by date (ascending) client-side
+  return transactions.sort((a, b) => {
+    const dateA = a.date?.toDate ? a.date.toDate() : new Date(a.date);
+    const dateB = b.date?.toDate ? b.date.toDate() : new Date(b.date);
+    return dateA.getTime() - dateB.getTime(); // Ascending order (earliest first)
+  });
+}
+
+/**
+ * Get completed transactions only
+ */
+export async function getCompletedTransactions(userId: string): Promise<any[]> {
+  const transactionsRef = collection(db, "users", userId, "transactions");
+  // Only filter by status, sort client-side to avoid composite index requirement
+  const q = query(
+    transactionsRef, 
+    where("status", "==", "completed")
+  );
+  const snapshot = await getDocs(q);
+
+  const transactions = snapshot.docs.map((doc) => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+
+  // Sort by date (descending) client-side
+  return transactions.sort((a, b) => {
+    const dateA = a.date?.toDate ? a.date.toDate() : new Date(a.date);
+    const dateB = b.date?.toDate ? b.date.toDate() : new Date(b.date);
+    return dateB.getTime() - dateA.getTime(); // Descending order (most recent first)
+  });
+}
+
+/**
+ * Execute scheduled transaction (convert to completed and update balances)
+ */
+export async function executeScheduledTransaction(userId: string, transactionId: string): Promise<void> {
+  const transactionRef = doc(db, "users", userId, "transactions", transactionId);
+  const transactionSnap = await getDoc(transactionRef);
+
+  if (!transactionSnap.exists()) {
+    throw new Error("Transaction not found");
+  }
+
+  const transaction = transactionSnap.data();
+
+  // Update account balances
+  if (transaction.type === "transfer" && transaction.toAccountId) {
+    await transferBetweenAccounts(
+      userId,
+      transaction.accountId,
+      transaction.toAccountId,
+      transaction.amount
+    );
+  } else if (transaction.type === "income") {
+    await updateAccountBalance(userId, transaction.accountId, transaction.amount, "add");
+  } else if (transaction.type === "expense") {
+    await updateAccountBalance(userId, transaction.accountId, transaction.amount, "subtract");
+  }
+
+  // Update transaction status
+  await updateDoc(transactionRef, {
+    status: "completed",
+    updatedAt: serverTimestamp(),
+  });
+
+  // If recurring, create next scheduled transaction
+  if (transaction.isRecurring && transaction.recurringInterval && transaction.nextScheduledDate) {
+    const nextDate = transaction.nextScheduledDate.toDate();
+    
+    // Calculate the date after next
+    let dateAfterNext = new Date(nextDate);
+    switch (transaction.recurringInterval) {
+      case "daily":
+        dateAfterNext.setDate(dateAfterNext.getDate() + 1);
+        break;
+      case "weekly":
+        dateAfterNext.setDate(dateAfterNext.getDate() + 7);
+        break;
+      case "monthly":
+        dateAfterNext.setMonth(dateAfterNext.getMonth() + 1);
+        break;
+      case "yearly":
+        dateAfterNext.setFullYear(dateAfterNext.getFullYear() + 1);
+        break;
+    }
+
+    // Create next scheduled transaction
+    await createTransaction(userId, {
+      type: transaction.type,
+      amount: transaction.amount,
+      accountId: transaction.accountId,
+      toAccountId: transaction.toAccountId,
+      category: transaction.category,
+      incomeCategory: transaction.incomeCategory,
+      description: transaction.description,
+      date: nextDate,
+      isRecurring: true,
+      recurringInterval: transaction.recurringInterval,
+    });
+  }
 }
 
 /**
@@ -1324,6 +1571,7 @@ export async function getFilteredTransactions(
   }
 ): Promise<any[]> {
   const transactionsRef = collection(db, "users", userId, "transactions");
+  // Order by date only - full sorting will be done client-side
   let q = query(transactionsRef, orderBy("date", "desc"));
 
   // Apply type filter

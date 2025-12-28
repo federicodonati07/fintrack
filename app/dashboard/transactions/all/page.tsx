@@ -1,17 +1,21 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
+import AnimatedCounter from "@/components/AnimatedCounter";
 import {
   getUserDocument,
   getAccounts,
   getTransactions,
+  getAllTransactionsIncludingShared,
   getUserCategories,
   deleteTransaction,
 } from "@/lib/firestore";
-import { User, Account, Category } from "@/lib/types";
+import { getSharedAccountsByMember } from "@/lib/sharedAccounts";
+import { User, Account, Category, SharedAccount } from "@/lib/types";
+import { Dialog, Transition, Checkbox } from "@headlessui/react";
 import {
   ArrowUpIcon,
   ArrowDownIcon,
@@ -21,6 +25,8 @@ import {
   XMarkIcon,
   CalendarIcon,
   TrashIcon,
+  ClockIcon,
+  ExclamationTriangleIcon,
 } from "@heroicons/react/24/outline";
 import { useToast } from "@/hooks/useToast";
 import { useCurrency } from "@/contexts/CurrencyContext";
@@ -32,6 +38,7 @@ export default function AllTransactionsPage() {
   const [loading, setLoading] = useState(true);
   const [user, setUser] = useState<User | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [sharedAccounts, setSharedAccounts] = useState<SharedAccount[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [allTransactions, setAllTransactions] = useState<any[]>([]);
   const [filteredTransactions, setFilteredTransactions] = useState<any[]>([]);
@@ -39,6 +46,8 @@ export default function AllTransactionsPage() {
   const [showFilters, setShowFilters] = useState(false);
   const [selectedTransaction, setSelectedTransaction] = useState<any | null>(null);
   const [showDetailModal, setShowDetailModal] = useState(false);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
+  const [transactionToDelete, setTransactionToDelete] = useState<any | null>(null);
   const [page, setPage] = useState(1);
   const ITEMS_PER_PAGE = 10;
 
@@ -46,6 +55,7 @@ export default function AllTransactionsPage() {
   const [filters, setFilters] = useState({
     searchText: "",
     type: "all", // all, income, expense, transfer
+    status: "all", // all, completed, scheduled
     accountId: "all",
     category: "all",
     minAmount: "",
@@ -53,6 +63,7 @@ export default function AllTransactionsPage() {
     startDate: "",
     endDate: "",
   });
+  const [includeSharedAccounts, setIncludeSharedAccounts] = useState(true);
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
@@ -70,12 +81,16 @@ export default function AllTransactionsPage() {
           const userAccounts = await getAccounts(firebaseUser.uid);
           setAccounts(userAccounts);
 
+          // Load shared accounts
+          const userSharedAccounts = await getSharedAccountsByMember(firebaseUser.uid);
+          setSharedAccounts(userSharedAccounts);
+
           // Load categories
           const userCategories = await getUserCategories(firebaseUser.uid);
           setCategories(userCategories);
 
-          // Load all transactions
-          const transactions = await getTransactions(firebaseUser.uid);
+          // Load all transactions (including shared if enabled)
+          const transactions = await getAllTransactionsIncludingShared(firebaseUser.uid);
           setAllTransactions(transactions);
           setFilteredTransactions(transactions);
         }
@@ -94,6 +109,11 @@ export default function AllTransactionsPage() {
   useEffect(() => {
     let filtered = [...allTransactions];
 
+    // Shared accounts filter
+    if (!includeSharedAccounts) {
+      filtered = filtered.filter((t) => !t.isSharedAccountTransaction);
+    }
+
     // Search text filter
     if (filters.searchText.trim()) {
       const search = filters.searchText.toLowerCase();
@@ -105,6 +125,11 @@ export default function AllTransactionsPage() {
     // Type filter
     if (filters.type !== "all") {
       filtered = filtered.filter((t) => t.type === filters.type);
+    }
+
+    // Status filter
+    if (filters.status !== "all") {
+      filtered = filtered.filter((t) => t.status === filters.status);
     }
 
     // Account filter
@@ -141,7 +166,7 @@ export default function AllTransactionsPage() {
 
     setFilteredTransactions(filtered);
     setPage(1); // Reset to first page when filters change
-  }, [filters, allTransactions]);
+  }, [filters, allTransactions, includeSharedAccounts]);
 
   // Update displayed transactions when page or filtered transactions change
   useEffect(() => {
@@ -169,15 +194,21 @@ export default function AllTransactionsPage() {
     });
   };
 
-  const handleDeleteTransaction = async (transactionId: string) => {
-    if (!user) return;
+  const openDeleteModal = (transaction: any) => {
+    setTransactionToDelete(transaction);
+    setShowDeleteModal(true);
+  };
 
-    if (!confirm("Are you sure you want to delete this transaction? This will reverse its effects on your account balances.")) {
-      return;
-    }
+  const closeDeleteModal = () => {
+    setTransactionToDelete(null);
+    setShowDeleteModal(false);
+  };
+
+  const confirmDeleteTransaction = async () => {
+    if (!user || !transactionToDelete) return;
 
     try {
-      await deleteTransaction(user.uid, transactionId);
+      await deleteTransaction(user.uid, transactionToDelete.id);
       
       // Reload transactions and accounts
       const transactions = await getTransactions(user.uid);
@@ -187,7 +218,8 @@ export default function AllTransactionsPage() {
       const userAccounts = await getAccounts(user.uid);
       setAccounts(userAccounts);
       
-      // Close detail modal if it's open
+      // Close both modals
+      closeDeleteModal();
       if (showDetailModal) {
         setShowDetailModal(false);
         setSelectedTransaction(null);
@@ -197,6 +229,14 @@ export default function AllTransactionsPage() {
     } catch (error: any) {
       console.error("Error deleting transaction:", error);
       showToast(`❌ ${error.message || "Error deleting transaction"}`, "error");
+    }
+  };
+
+  const handleDeleteTransaction = async (transactionId: string) => {
+    if (!user) return;
+    const transaction = allTransactions.find(t => t.id === transactionId) || selectedTransaction;
+    if (transaction) {
+      openDeleteModal(transaction);
     }
   };
 
@@ -210,8 +250,9 @@ export default function AllTransactionsPage() {
     setSelectedTransaction(null);
   };
 
-  const activeFiltersCount = 
+  const activeFiltersCount =
     (filters.type !== "all" ? 1 : 0) +
+    (filters.status !== "all" ? 1 : 0) +
     (filters.accountId !== "all" ? 1 : 0) +
     (filters.category !== "all" ? 1 : 0) +
     (filters.minAmount ? 1 : 0) +
@@ -236,10 +277,32 @@ export default function AllTransactionsPage() {
         {/* Header */}
         <div className="mb-8">
           <div className="bg-white p-6 rounded-lg border border-gray-200 shadow-sm">
-            <h1 className="text-2xl font-semibold text-[#0F172A] mb-1">All Transactions</h1>
-            <p className="text-sm text-gray-500">
-              View and filter all your financial transactions
-            </p>
+            <div className="flex items-center justify-between">
+              <div>
+                <h1 className="text-2xl font-semibold text-[#0F172A] mb-1">All Transactions</h1>
+                <p className="text-sm text-gray-500">
+                  View and filter all your financial transactions
+                </p>
+              </div>
+              {sharedAccounts.length > 0 && (
+                <div className="flex items-center gap-3 px-4 py-2 bg-gray-50 rounded-xl border border-gray-200">
+                  <Checkbox
+                    checked={includeSharedAccounts}
+                    onChange={setIncludeSharedAccounts}
+                    className="group relative flex items-center"
+                  >
+                    <span className="flex h-5 w-5 items-center justify-center rounded border border-gray-300 bg-white group-data-[checked]:bg-[#22C55E] group-data-[checked]:border-[#22C55E] transition-colors">
+                      <svg className="h-3 w-3 text-white opacity-0 group-data-[checked]:opacity-100" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}>
+                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                      </svg>
+                    </span>
+                  </Checkbox>
+                  <label className="text-sm font-medium text-gray-700 cursor-pointer select-none">
+                    Include Shared Accounts
+                  </label>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -293,6 +356,22 @@ export default function AllTransactionsPage() {
                   <option value="partition_creation">Partition Creation</option>
                   <option value="partition_transfer_to">To Partition</option>
                   <option value="partition_transfer_from">From Partition</option>
+                </select>
+              </div>
+
+              {/* Status Filter */}
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Status
+                </label>
+                <select
+                  value={filters.status}
+                  onChange={(e) => setFilters({ ...filters, status: e.target.value })}
+                  className="w-full px-4 py-2 bg-gray-50 border-2 border-gray-200 rounded-xl text-[#0F172A] focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all text-sm"
+                >
+                  <option value="all">All Status</option>
+                  <option value="completed">Completed</option>
+                  <option value="scheduled">Scheduled</option>
                 </select>
               </div>
 
@@ -418,24 +497,42 @@ export default function AllTransactionsPage() {
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <div className="bg-white rounded-2xl p-5 shadow-lg border border-gray-100">
             <p className="text-sm text-gray-500 font-semibold mb-1">Total Transactions</p>
-            <p className="text-3xl font-black text-[#0F172A]">{filteredTransactions.length}</p>
+            <p className="text-3xl font-black text-[#0F172A]">
+              <AnimatedCounter
+                value={filteredTransactions.length}
+                duration={1.25}
+                formatFn={(val) => Math.floor(val).toString()}
+              />
+            </p>
           </div>
           <div className="bg-gradient-to-br from-green-50 to-emerald-50 rounded-2xl p-5 shadow-lg border border-green-100">
             <p className="text-sm text-green-700 font-semibold mb-1">Income</p>
             <p className="text-3xl font-black text-green-600">
-              {filteredTransactions.filter((t) => t.type === "income").length}
+              <AnimatedCounter
+                value={filteredTransactions.filter((t) => t.type === "income").length}
+                duration={1.25}
+                formatFn={(val) => Math.floor(val).toString()}
+              />
             </p>
           </div>
           <div className="bg-gradient-to-br from-red-50 to-rose-50 rounded-2xl p-5 shadow-lg border border-red-100">
             <p className="text-sm text-red-700 font-semibold mb-1">Expenses</p>
             <p className="text-3xl font-black text-red-600">
-              {filteredTransactions.filter((t) => t.type === "expense").length}
+              <AnimatedCounter
+                value={filteredTransactions.filter((t) => t.type === "expense").length}
+                duration={1.25}
+                formatFn={(val) => Math.floor(val).toString()}
+              />
             </p>
           </div>
           <div className="bg-gradient-to-br from-blue-50 to-cyan-50 rounded-2xl p-5 shadow-lg border border-blue-100">
             <p className="text-sm text-blue-700 font-semibold mb-1">Transfers</p>
             <p className="text-3xl font-black text-blue-600">
-              {filteredTransactions.filter((t) => t.type === "transfer" || t.type?.startsWith("partition")).length}
+              <AnimatedCounter
+                value={filteredTransactions.filter((t) => t.type === "transfer" || t.type?.startsWith("partition")).length}
+                duration={1.25}
+                formatFn={(val) => Math.floor(val).toString()}
+              />
             </p>
           </div>
         </div>
@@ -457,27 +554,58 @@ export default function AllTransactionsPage() {
               </div>
             ) : (
               displayedTransactions.map((transaction) => {
-                const account = accounts.find((a) => a.id === transaction.accountId);
-                const toAccount = accounts.find((a) => a.id === transaction.toAccountId);
+                // Handle both personal and shared accounts
+                let account, toAccount;
+                if (transaction.isSharedAccountTransaction) {
+                  // For shared account transactions, use stored info
+                  account = {
+                    id: transaction.sharedAccountId,
+                    name: transaction.sharedAccountName,
+                    color: transaction.sharedAccountColor,
+                  };
+                  if (transaction.toAccountId?.startsWith("shared-")) {
+                    const toSharedAccount = sharedAccounts.find((a) => `shared-${a.id}` === transaction.toAccountId);
+                    toAccount = toSharedAccount ? {
+                      id: toSharedAccount.id,
+                      name: toSharedAccount.name,
+                      color: toSharedAccount.color,
+                    } : null;
+                  } else {
+                    toAccount = accounts.find((a) => a.id === transaction.toAccountId);
+                  }
+                } else {
+                  account = accounts.find((a) => a.id === transaction.accountId) || 
+                           sharedAccounts.find((a) => `shared-${a.id}` === transaction.accountId);
+                  toAccount = accounts.find((a) => a.id === transaction.toAccountId) ||
+                             sharedAccounts.find((a) => `shared-${a.id}` === transaction.toAccountId);
+                }
+                
                 const category = categories.find((c) => c.name === transaction.category);
+                const isScheduled = transaction.status === "scheduled";
 
                 return (
                   <div
                     key={transaction.id}
                     onClick={() => openDetailModal(transaction)}
-                    className="group flex items-center gap-4 p-5 hover:bg-gray-50 transition-colors cursor-pointer"
+                    className={`group flex items-center gap-4 p-5 hover:bg-gray-50 transition-colors cursor-pointer ${
+                      isScheduled ? "opacity-50" : ""
+                    }`}
                   >
                     {/* Icon */}
                     <div
                       className={`w-12 h-12 rounded-lg flex items-center justify-center flex-shrink-0 ${
-                        transaction.type === "income"
+                        isScheduled
+                          ? "bg-gray-400/10"
+                          : transaction.type === "income"
                           ? "bg-[#22C55E]/10"
                           : transaction.type === "expense"
                           ? "bg-red-500/10"
                           : "bg-blue-500/10"
                       }`}
                     >
-                      {transaction.type === "income" ? (
+                      {isScheduled ? (
+                        <ClockIcon className="w-6 h-6 text-gray-400" />
+                      ) : transaction.type === "income" ? (
                         <ArrowUpIcon className="w-6 h-6 text-[#22C55E]" />
                       ) : transaction.type === "expense" ? (
                         <ArrowDownIcon className="w-6 h-6 text-red-600" />
@@ -768,7 +896,6 @@ export default function AllTransactionsPage() {
               <div className="border-t border-gray-200 px-8 py-6 flex justify-between items-center bg-gray-50">
                 <button
                   onClick={() => {
-                    closeDetailModal();
                     handleDeleteTransaction(selectedTransaction.id);
                   }}
                   className="px-6 py-3 bg-red-500 hover:bg-red-600 text-white rounded-xl font-semibold transition-colors flex items-center gap-2"
@@ -786,6 +913,119 @@ export default function AllTransactionsPage() {
             </div>
           </div>
         )}
+
+      {/* Delete Confirmation Modal */}
+      <Transition appear show={showDeleteModal} as={Fragment}>
+        <Dialog as="div" className="relative z-50" onClose={closeDeleteModal}>
+          <Transition.Child
+            as={Fragment}
+            enter="ease-out duration-300"
+            enterFrom="opacity-0"
+            enterTo="opacity-100"
+            leave="ease-in duration-200"
+            leaveFrom="opacity-100"
+            leaveTo="opacity-0"
+          >
+            <div className="fixed inset-0 bg-black/50 backdrop-blur-sm" />
+          </Transition.Child>
+
+          <div className="fixed inset-0 overflow-y-auto">
+            <div className="flex min-h-full items-center justify-center p-4">
+              <Transition.Child
+                as={Fragment}
+                enter="ease-out duration-300"
+                enterFrom="opacity-0 scale-95"
+                enterTo="opacity-100 scale-100"
+                leave="ease-in duration-200"
+                leaveFrom="opacity-100 scale-100"
+                leaveTo="opacity-0 scale-95"
+              >
+                <Dialog.Panel className="w-full max-w-md transform overflow-hidden rounded-lg bg-white shadow-xl transition-all">
+                  {/* Header */}
+                  <div className="bg-red-600 px-6 py-4">
+                    <div className="flex items-center gap-3">
+                      <div className="flex-shrink-0">
+                        <ExclamationTriangleIcon className="w-6 h-6 text-white" />
+                      </div>
+                      <Dialog.Title className="text-lg font-semibold text-white">
+                        Delete Transaction
+                      </Dialog.Title>
+                    </div>
+                  </div>
+
+                  {/* Content */}
+                  <div className="px-6 py-5">
+                    <p className="text-sm text-gray-600 mb-4">
+                      Are you sure you want to delete this transaction? This action will:
+                    </p>
+                    <ul className="space-y-2 mb-4">
+                      <li className="flex items-start gap-2 text-sm text-gray-600">
+                        <span className="text-red-500 font-bold">•</span>
+                        <span>Reverse its effects on your account balances</span>
+                      </li>
+                      <li className="flex items-start gap-2 text-sm text-gray-600">
+                        <span className="text-red-500 font-bold">•</span>
+                        <span>Permanently remove the transaction record</span>
+                      </li>
+                      <li className="flex items-start gap-2 text-sm text-gray-600">
+                        <span className="text-red-500 font-bold">•</span>
+                        <span>Cannot be undone</span>
+                      </li>
+                    </ul>
+
+                    {transactionToDelete && (
+                      <div className="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                        <p className="text-sm font-semibold text-gray-900 mb-1">
+                          {transactionToDelete.description}
+                        </p>
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs text-gray-500">
+                            {transactionToDelete.date?.toDate
+                              ? transactionToDelete.date.toDate().toLocaleDateString("en-GB")
+                              : new Date(transactionToDelete.date).toLocaleDateString("en-GB")}
+                          </span>
+                          <span
+                            className={`text-sm font-bold ${
+                              transactionToDelete.type === "income"
+                                ? "text-green-600"
+                                : transactionToDelete.type === "expense"
+                                ? "text-red-600"
+                                : "text-blue-600"
+                            }`}
+                          >
+                            {transactionToDelete.type === "expense"
+                              ? "-"
+                              : transactionToDelete.type === "income"
+                              ? "+"
+                              : ""}
+                            {formatAmount(transactionToDelete.amount)}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Actions */}
+                  <div className="flex gap-3 px-6 pb-5">
+                    <button
+                      onClick={closeDeleteModal}
+                      className="flex-1 px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg font-medium transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={confirmDeleteTransaction}
+                      className="flex-1 px-4 py-2.5 bg-red-600 hover:bg-red-700 text-white rounded-lg font-medium transition-colors"
+                    >
+                      Delete Transaction
+                    </button>
+                  </div>
+                </Dialog.Panel>
+              </Transition.Child>
+            </div>
+          </div>
+        </Dialog>
+      </Transition>
       </div>
     </div>
   );

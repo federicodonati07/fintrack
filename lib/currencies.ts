@@ -63,3 +63,5 @@ export function formatCurrency(amount: number, currencyCode: string): string {
   return `${currency.symbol}${amount.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+
+

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
+import AnimatedCounter from "@/components/AnimatedCounter";
 import {
   getUserDocument,
   getAccounts,
@@ -18,6 +19,8 @@ import {
   createInternalSubAccountTransaction,
   updateAccountsOrder,
 } from "@/lib/firestore";
+import SharedAccountsManager from "@/components/SharedAccountsManager";
+import { getSharedAccounts } from "@/lib/sharedAccounts";
 import { User, Account } from "@/lib/types";
 import { useCurrency } from "@/contexts/CurrencyContext";
 import {
@@ -101,7 +104,9 @@ function SortableAccountCard({
   openEditModal,
   openDeleteModal,
   router,
-  formatAmount
+  formatAmount,
+  formatCompact,
+  AnimatedCounter
 }: any) {
   const {
     attributes,
@@ -128,20 +133,27 @@ function SortableAccountCard({
     <div
       ref={setNodeRef}
       style={style}
-      className="group relative bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-lg hover:border-gray-300 transition-all duration-200"
+      className="group relative bg-white rounded-xl border border-gray-200 overflow-hidden hover:shadow-lg hover:border-gray-300 hover:scale-[1.02] transition-all duration-300 flex flex-col cursor-pointer"
       onDoubleClick={handleDoubleClick}
     >
-      {/* Colored accent bar - DRAGGABLE */}
+      {/* Colored accent bar - DRAGGABLE with grip */}
       <div
         {...attributes}
         {...listeners}
-        className="h-2 cursor-move"
+        className="h-8 cursor-grab active:cursor-grabbing flex items-center justify-center relative"
         style={{
           backgroundColor: account.color || accountType?.color || "#3B82F6",
         }}
-      />
+      >
+        {/* Grip indicator */}
+        <div className="flex gap-1">
+          <div className="w-1 h-4 bg-white/40 rounded-full"></div>
+          <div className="w-1 h-4 bg-white/40 rounded-full"></div>
+          <div className="w-1 h-4 bg-white/40 rounded-full"></div>
+        </div>
+      </div>
 
-      <div className="p-6">
+      <div className="p-6 flex-1 flex flex-col">
         {/* Header */}
         <div className="flex items-start justify-between mb-5">
           <div className="flex items-center gap-3">
@@ -174,33 +186,46 @@ function SortableAccountCard({
           )}
         </div>
 
-        {/* Description */}
-        {account.description && (
-          <p className="text-sm text-gray-600 mb-5 line-clamp-2">{account.description}</p>
-        )}
-
         {/* Balance Section */}
-        <div className="mb-5 p-4 bg-gray-50 rounded-lg border border-gray-200">
-          <p className="text-xs text-gray-500 font-semibold mb-1 uppercase tracking-wider">
+        <div className="mb-5 p-4 bg-gray-50 rounded-lg border border-gray-200 transition-all duration-300 group-hover:p-6">
+          <p className="text-xs text-gray-500 font-semibold mb-2 uppercase tracking-wider">
             {account.hasSubAccounts ? "Available Balance" : "Current Balance"}
           </p>
-          <p className="text-3xl font-bold text-[#0F172A]">
-            {formatAmount(account.currentBalance)}
+          <p className="text-3xl font-bold text-[#0F172A] transition-all duration-300 group-hover:text-4xl">
+            <span className="group-hover:hidden">
+              <AnimatedCounter
+                value={account.currentBalance}
+                duration={1.25}
+                formatFn={(val) => formatCompact(val)}
+              />
+            </span>
+            <span className="hidden group-hover:inline">
+              {formatAmount(account.currentBalance)}
+            </span>
           </p>
           {account.hasSubAccounts && accountTotals[account.id] && (
-            <div className="mt-3 pt-3 border-t border-gray-200">
-              <p className="text-xs text-gray-500 font-semibold mb-1 uppercase tracking-wider">
+            <div className="mt-4 pt-4 border-t border-gray-200">
+              <p className="text-xs text-gray-500 font-semibold mb-2 uppercase tracking-wider">
                 Total with Partitions
               </p>
               <p 
-                className="text-xl font-bold"
+                className="text-xl font-bold transition-all duration-300 group-hover:text-3xl"
                 style={{ color: account.color || accountType?.color || "#3B82F6" }}
               >
-                {formatAmount(accountTotals[account.id])}
+                <span className="group-hover:hidden">
+                  <AnimatedCounter
+                    value={accountTotals[account.id]}
+                    duration={1.25}
+                    formatFn={(val) => formatCompact(val)}
+                  />
+                </span>
+                <span className="hidden group-hover:inline">
+                  {formatAmount(accountTotals[account.id])}
+                </span>
               </p>
             </div>
           )}
-          <p className="text-xs text-gray-400 font-medium mt-2">
+          <p className="text-xs text-gray-400 font-medium mt-3">
             Initial: {formatAmount(account.initialBalance)}
           </p>
         </div>
@@ -247,8 +272,18 @@ function SortableAccountCard({
           </div>
         )}
 
-        {/* Action Buttons */}
-        <div className="space-y-2">
+        {/* Spacer to push content to bottom */}
+        <div className="flex-1"></div>
+
+        {/* Description - Always at same level */}
+        <div className="mb-5 min-h-[3rem]">
+          {account.description && (
+            <p className="text-sm text-gray-600 line-clamp-2">{account.description}</p>
+          )}
+        </div>
+
+        {/* Action Buttons - Always at bottom */}
+        <div className="space-y-2 mt-auto">
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -292,8 +327,13 @@ export default function AccountsPage() {
   const { formatAmount, currency } = useCurrency();
   const { toast, showToast, hideToast } = useToast();
   const [user, setUser] = useState<User | null>(null);
+  const [userPlan, setUserPlan] = useState<"free" | "pro" | "ultra" | "admin">("free");
+  const [userEmail, setUserEmail] = useState("");
+  const [userName, setUserName] = useState("");
+  const [pendingInvitesCount, setPendingInvitesCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [sharedAccounts, setSharedAccounts] = useState<any[]>([]);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showEditModal, setShowEditModal] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -309,6 +349,21 @@ export default function AccountsPage() {
   const [transferSourceType, setTransferSourceType] = useState<"account" | "partition">("account");
   const [transferDestinationType, setTransferDestinationType] = useState<"account" | "partition">("partition");
   const [selectedSourceSubAccount, setSelectedSourceSubAccount] = useState<any | null>(null);
+
+  // Helper function to format with K/M/B
+  const formatCompact = (amount: number): string => {
+    const absAmount = Math.abs(amount);
+    const sign = amount < 0 ? '-' : '';
+    
+    if (absAmount >= 1_000_000_000) {
+      return `${sign}${currency.symbol}${(absAmount / 1_000_000_000).toFixed(2)}B`;
+    } else if (absAmount >= 1_000_000) {
+      return `${sign}${currency.symbol}${(absAmount / 1_000_000).toFixed(2)}M`;
+    } else if (absAmount >= 100_000) {
+      return `${sign}${currency.symbol}${(absAmount / 1_000).toFixed(2)}K`;
+    }
+    return formatAmount(amount);
+  };
   const [selectedDestSubAccount, setSelectedDestSubAccount] = useState<any | null>(null);
   const [accountTotals, setAccountTotals] = useState<{ [key: string]: number }>({});
 
@@ -355,6 +410,9 @@ export default function AccountsPage() {
         const userDoc = await getUserDocument(firebaseUser.uid);
         if (userDoc) {
           setUser(userDoc);
+          setUserPlan(userDoc.plan as any);
+          setUserEmail(userDoc.email || firebaseUser.email || "");
+          setUserName(userDoc.name || userDoc.displayName || "Unknown User");
           
           // Load plan limits
           const limits = await getPlanLimits(userDoc.plan as any);
@@ -363,6 +421,15 @@ export default function AccountsPage() {
           // Load accounts
           const userAccounts = await getAccounts(firebaseUser.uid);
           setAccounts(userAccounts);
+          
+          // Load shared accounts
+          try {
+            const userSharedAccounts = await getSharedAccounts(firebaseUser.uid);
+            setSharedAccounts(userSharedAccounts);
+          } catch (error) {
+            console.error("Error loading shared accounts:", error);
+            setSharedAccounts([]);
+          }
         }
       } catch (error) {
         console.error("Error loading data:", error);
@@ -774,7 +841,7 @@ export default function AccountsPage() {
   const totalBalance = activeAccounts.reduce((sum, acc) => {
     // Use accountTotals if available (includes partitions), otherwise use currentBalance
     return sum + (accountTotals[acc.id] || acc.currentBalance);
-  }, 0);
+  }, 0) + sharedAccounts.reduce((sum, acc) => sum + (acc.currentBalance || 0), 0);
 
   if (loading) {
     return (
@@ -805,6 +872,12 @@ export default function AccountsPage() {
                   <div>
                     <h1 className="text-3xl font-bold text-white mb-1">Accounts & Funds</h1>
                     <p className="text-gray-300">Manage your accounts and funds</p>
+                    {pendingInvitesCount > 0 && (
+                      <div className="mt-2 inline-flex items-center gap-2 bg-blue-500/20 text-blue-300 px-3 py-1 rounded-full text-sm font-semibold">
+                        <span className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></span>
+                        {pendingInvitesCount} pending invite{pendingInvitesCount > 1 ? "s" : ""}
+                      </div>
+                    )}
                   </div>
                 </div>
 
@@ -818,7 +891,11 @@ export default function AccountsPage() {
                   <div className="bg-white/10 backdrop-blur-sm px-6 py-3 rounded-2xl border border-white/20">
                     <p className="text-xs text-gray-300 font-semibold mb-1">Total Balance</p>
                     <p className="text-2xl font-bold text-white">
-                      {formatAmount(totalBalance)}
+                      <AnimatedCounter
+                        value={totalBalance}
+                        duration={1.25}
+                        formatFn={(val) => formatCompact(val)}
+                      />
                     </p>
                   </div>
                 </div>
@@ -900,6 +977,8 @@ export default function AccountsPage() {
                       openDeleteModal={openDeleteModal}
                       router={router}
                       formatAmount={formatAmount}
+                      formatCompact={formatCompact}
+                      AnimatedCounter={AnimatedCounter}
                     />
                   );
                 })}
@@ -907,6 +986,21 @@ export default function AccountsPage() {
             </SortableContext>
           </DndContext>
         )}
+      </div>
+
+      {/* Shared Accounts Section */}
+      <div className="max-w-7xl mx-auto mt-8">
+        <div className="bg-white rounded-3xl shadow-xl border border-gray-200 p-8">
+          {user && (
+            <SharedAccountsManager
+              userId={user.uid}
+              userEmail={userEmail}
+              userName={userName}
+              userPlan={userPlan}
+              onInviteCountChange={(count) => setPendingInvitesCount(count)}
+            />
+          )}
+        </div>
       </div>
 
 
@@ -1333,8 +1427,9 @@ export default function AccountsPage() {
                         </button>
                         <button
                           onClick={handleDeleteAccount}
-                          className="flex-1 px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold hover:shadow-lg transition-all"
+                          className="flex-1 px-6 py-3 bg-gradient-to-r from-red-500 to-red-600 text-white rounded-xl font-semibold hover:shadow-lg transition-all flex items-center justify-center gap-2"
                         >
+                          <TrashIcon className="w-5 h-5" />
                           Delete
                         </button>
                       </div>

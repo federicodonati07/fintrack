@@ -12,6 +12,7 @@ import {
   getSubAccounts,
   getUserCategories,
 } from "@/lib/firestore";
+import { getSharedAccountsByMember } from "@/lib/sharedAccounts";
 import {
   ArrowLeftIcon,
   ChartBarIcon,
@@ -23,6 +24,7 @@ import {
   TagIcon,
   WalletIcon,
   ArrowPathIcon,
+  ChartPieIcon,
 } from "@heroicons/react/24/outline";
 import { CheckIcon, ChevronUpDownIcon } from "@heroicons/react/20/solid";
 import { Listbox, Transition } from "@headlessui/react";
@@ -40,7 +42,7 @@ import {
   Legend,
   Filler,
 } from "chart.js";
-import { Line, Bar, Doughnut } from "react-chartjs-2";
+import { Line, Bar, Doughnut, Pie } from "react-chartjs-2";
 import Toast from "@/components/Toast";
 import { useToast } from "@/hooks/useToast";
 import { useCurrency } from "@/contexts/CurrencyContext";
@@ -97,16 +99,18 @@ export default function PortfolioAnalyticsPage() {
         }
 
         const userAccounts = await getAccounts(currentUser.uid);
-        setAccounts(userAccounts);
+        const userSharedAccounts = await getSharedAccountsByMember(currentUser.uid);
+        const allAccounts = [...userAccounts, ...userSharedAccounts];
+        setAccounts(allAccounts);
         
         // Check if there's an account ID in the URL query params
         const accountIdFromUrl = searchParams.get("account");
-        if (accountIdFromUrl && userAccounts.length > 0) {
-          const preselectedAccount = userAccounts.find(acc => acc.id === accountIdFromUrl);
+        if (accountIdFromUrl && allAccounts.length > 0) {
+          const preselectedAccount = allAccounts.find(acc => acc.id === accountIdFromUrl);
           if (preselectedAccount) {
             setSelectedAccount(preselectedAccount);
           } else {
-            setSelectedAccount(userAccounts[0]);
+            setSelectedAccount(allAccounts[0]);
           }
         } else if (userAccounts.length > 0) {
           setSelectedAccount(userAccounts[0]);
@@ -181,28 +185,84 @@ export default function PortfolioAnalyticsPage() {
 
     const firstTxDate = sortedTx[0].date?.toDate ? sortedTx[0].date.toDate() : new Date(sortedTx[0].date);
     
-    // Determine time range based on period
+    // Determine time range and intervals based on period
     let startDate: Date;
+    let timePoints: Date[] = [];
+    
     switch (period) {
       case "daily":
-        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        // Last 24 hours, hourly intervals
+        startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        for (let i = 0; i <= 24; i++) {
+          timePoints.push(new Date(startDate.getTime() + i * 60 * 60 * 1000));
+        }
         break;
       case "weekly":
-        startDate = new Date(now.getTime() - 12 * 7 * 24 * 60 * 60 * 1000);
+        // Last 7 days, daily intervals
+        startDate = new Date(now);
+        startDate.setHours(0, 0, 0, 0);
+        startDate.setDate(startDate.getDate() - 6);
+        for (let i = 0; i <= 6; i++) {
+          const date = new Date(startDate);
+          date.setDate(startDate.getDate() + i);
+          timePoints.push(date);
+        }
         break;
       case "monthly":
+        // Last 30 days, daily intervals
         startDate = new Date(now);
-        startDate.setMonth(startDate.getMonth() - 12);
+        startDate.setHours(0, 0, 0, 0);
+        startDate.setDate(startDate.getDate() - 29);
+        for (let i = 0; i <= 29; i++) {
+          const date = new Date(startDate);
+          date.setDate(startDate.getDate() + i);
+          timePoints.push(date);
+        }
         break;
       case "yearly":
+        // Last 12 months, monthly intervals
         startDate = new Date(now);
-        startDate.setFullYear(startDate.getFullYear() - 5);
+        startDate.setDate(1);
+        startDate.setHours(0, 0, 0, 0);
+        startDate.setMonth(startDate.getMonth() - 11);
+        for (let i = 0; i <= 11; i++) {
+          const date = new Date(startDate);
+          date.setMonth(startDate.getMonth() + i);
+          timePoints.push(date);
+        }
         break;
       case "all":
-        startDate = firstTxDate;
+        // From first transaction to now, auto intervals
+        startDate = new Date(firstTxDate);
+        startDate.setHours(0, 0, 0, 0);
+        const daysDiff = Math.floor((now.getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000));
+        if (daysDiff <= 30) {
+          // Daily for last month
+          for (let i = 0; i <= daysDiff; i++) {
+            const date = new Date(startDate);
+            date.setDate(startDate.getDate() + i);
+            timePoints.push(date);
+          }
+        } else if (daysDiff <= 365) {
+          // Weekly for last year
+          for (let i = 0; i <= Math.ceil(daysDiff / 7); i++) {
+            const date = new Date(startDate);
+            date.setDate(startDate.getDate() + i * 7);
+            timePoints.push(date);
+          }
+        } else {
+          // Monthly for longer periods
+          const monthsDiff = Math.floor(daysDiff / 30);
+          for (let i = 0; i <= monthsDiff; i++) {
+            const date = new Date(startDate);
+            date.setMonth(startDate.getMonth() + i);
+            timePoints.push(date);
+          }
+        }
         break;
       default:
-        startDate = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
+        startDate = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+        timePoints.push(startDate, now);
     }
 
     // Filter transactions in the time range (exclude partition transactions from graph)
@@ -213,68 +273,51 @@ export default function PortfolioAnalyticsPage() {
       return inRange && isNotPartition;
     });
 
-    if (relevantTransactions.length === 0) {
-      return { labels: ["Now"], data: [Math.max(0, currentTotalBalance)] };
-    }
-
-    // Build data points only at transaction dates
+    // Calculate balance at each time point
     const dataPoints: { date: Date; balance: number }[] = [];
     
-    // Start from current total balance and work backwards
-    let runningBalance = currentTotalBalance;
-    
-    // Go through transactions from newest to oldest
-    for (let i = relevantTransactions.length - 1; i >= 0; i--) {
-      const tx = relevantTransactions[i];
-      const txDate = tx.date?.toDate ? tx.date.toDate() : new Date(tx.date);
+    for (const timePoint of timePoints) {
+      // Start from current balance and work backwards
+      let balanceAtTime = currentTotalBalance;
       
-      // Add current point before processing this transaction
-      dataPoints.unshift({
-        date: new Date(txDate),
-        balance: Math.max(0, runningBalance),
-      });
-      
-      // Subtract this transaction to get previous balance
-      // Only income and expense affect the TOTAL balance (account + partitions)
-      if (tx.type === "income" && tx.accountId === selectedAccount.id) {
-        runningBalance -= tx.amount;
-      } else if (tx.type === "expense" && tx.accountId === selectedAccount.id) {
-        runningBalance += tx.amount;
-      } else if (tx.type === "transfer") {
-        if (tx.accountId === selectedAccount.id) {
-          runningBalance += tx.amount;
-        }
-        if (tx.toAccountId === selectedAccount.id) {
-          runningBalance -= tx.amount;
+      // Subtract all transactions that happened AFTER this time point
+      for (const tx of relevantTransactions) {
+        const txDate = tx.date?.toDate ? tx.date.toDate() : new Date(tx.date);
+        
+        if (txDate > timePoint) {
+          // Reverse the transaction effect
+          if (tx.type === "income" && tx.accountId === selectedAccount.id) {
+            balanceAtTime -= tx.amount;
+          } else if (tx.type === "expense" && tx.accountId === selectedAccount.id) {
+            balanceAtTime += tx.amount;
+          } else if (tx.type === "transfer") {
+            if (tx.accountId === selectedAccount.id) {
+              balanceAtTime += tx.amount;
+            }
+            if (tx.toAccountId === selectedAccount.id) {
+              balanceAtTime -= tx.amount;
+            }
+          }
         }
       }
-    }
-    
-    // Add the oldest point (before first transaction)
-    if (dataPoints.length > 0) {
-      dataPoints.unshift({
-        date: new Date(dataPoints[0].date.getTime() - 1000),
-        balance: Math.max(0, runningBalance),
+      
+      dataPoints.push({
+        date: timePoint,
+        balance: Math.max(0, balanceAtTime),
       });
     }
-    
-    // Add current point at the end (MUST be currentTotalBalance)
-    dataPoints.push({
-      date: now,
-      balance: Math.max(0, currentTotalBalance),
-    });
 
     // Format labels based on period
     const formatLabel = (date: Date) => {
       switch (period) {
         case "daily":
+          return date.toLocaleTimeString("en-US", { hour: "numeric", hour12: true });
         case "weekly":
-          return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
         case "monthly":
-          return date.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
+          return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
         case "yearly":
         case "all":
-          return date.toLocaleDateString("en-US", { month: "short", year: "numeric" });
+          return date.toLocaleDateString("en-US", { month: "short", year: "2-digit" });
         default:
           return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
       }
@@ -285,6 +328,30 @@ export default function PortfolioAnalyticsPage() {
       data: dataPoints.map(p => p.balance),
     };
   }, [selectedAccount, accountTransactions, subAccounts, period]);
+
+  // Portfolio allocation pie chart data
+  const portfolioAllocationData = useMemo(() => {
+    if (!selectedAccount) return { labels: [], data: [], colors: [] };
+
+    const accountSubAccounts = subAccounts.filter(sub => sub.parentAccountId === selectedAccount.id);
+    
+    // Calculate available balance (account balance excluding partitioned amounts)
+    const availableBalance = selectedAccount.currentBalance || 0;
+    
+    // Prepare data
+    const labels: string[] = ["Available Balance"];
+    const data: number[] = [Math.max(0, availableBalance)];
+    const colors: string[] = [selectedAccount.color || "#3B82F6"];
+
+    // Add each partition
+    accountSubAccounts.forEach(sub => {
+      labels.push(sub.name || `Partition ${sub.id.slice(0, 8)}`);
+      data.push(Math.max(0, sub.balance || 0));
+      colors.push(sub.color || "#6B7280");
+    });
+
+    return { labels, data, colors };
+  }, [selectedAccount, subAccounts]);
 
   // Calculate inflow/outflow
   const inflowOutflowData = useMemo(() => {
@@ -647,6 +714,79 @@ export default function PortfolioAnalyticsPage() {
               </div>
             </CardBody>
           </Card>
+
+          {/* Portfolio Allocation Pie Chart */}
+          {portfolioAllocationData.labels.length > 1 && (
+            <Card className="border border-gray-200 shadow-sm bg-white rounded-lg">
+              <CardBody className="p-6">
+                <div className="flex items-center gap-3 mb-4">
+                  <div className="p-2.5 bg-purple-600 rounded-lg">
+                    <ChartPieIcon className="w-5 h-5 text-white" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-semibold text-[#0F172A]">Portfolio Allocation</h3>
+                    <p className="text-xs text-gray-500">Distribution across account and partitions</p>
+                  </div>
+                </div>
+                <div className="h-64">
+                  <Pie
+                    data={{
+                      labels: portfolioAllocationData.labels,
+                      datasets: [{
+                        data: portfolioAllocationData.data,
+                        backgroundColor: portfolioAllocationData.colors.map(color => `${color}CC`),
+                        borderColor: portfolioAllocationData.colors,
+                        borderWidth: 2,
+                      }],
+                    }}
+                    options={{
+                      responsive: true,
+                      maintainAspectRatio: false,
+                      plugins: {
+                        legend: {
+                          position: 'bottom',
+                          labels: {
+                            padding: 15,
+                            font: { size: 12 },
+                            generateLabels: (chart) => {
+                              const data = chart.data;
+                              if (data.labels && data.datasets) {
+                                const total = data.datasets[0].data.reduce((sum: number, val: any) => sum + val, 0);
+                                return data.labels.map((label, i) => {
+                                  const value = data.datasets[0].data[i] as number;
+                                  const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : '0.0';
+                                  return {
+                                    text: `${label}: ${percentage}%`,
+                                    fillStyle: data.datasets[0].backgroundColor[i],
+                                    strokeStyle: data.datasets[0].borderColor[i],
+                                    lineWidth: 2,
+                                    hidden: false,
+                                    index: i,
+                                  };
+                                });
+                              }
+                              return [];
+                            },
+                          },
+                        },
+                        tooltip: {
+                          callbacks: {
+                            label: (context) => {
+                              const label = context.label || '';
+                              const value = context.parsed;
+                              const total = context.dataset.data.reduce((sum: number, val: any) => sum + val, 0);
+                              const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : '0.0';
+                              return `${label}: ${currency.symbol}${value.toLocaleString("en-US", { minimumFractionDigits: 2 })} (${percentage}%)`;
+                            },
+                          },
+                        },
+                      },
+                    }}
+                  />
+                </div>
+              </CardBody>
+            </Card>
+          )}
 
           {/* Inflow vs Outflow Chart */}
           <Card className="border border-gray-200 shadow-sm bg-white rounded-lg">

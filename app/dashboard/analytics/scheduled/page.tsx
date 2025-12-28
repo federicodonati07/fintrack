@@ -5,11 +5,17 @@ import { useRouter } from "next/navigation";
 import { onAuthStateChanged } from "firebase/auth";
 import { auth } from "@/lib/firebase";
 import { Card, CardBody, Button } from "@heroui/react";
+import AnimatedCounter from "@/components/AnimatedCounter";
+import { Checkbox } from "@headlessui/react";
 import {
   getUserDocument,
   getAccounts,
   getTransactions,
+  getScheduledTransactions,
+  executeScheduledTransaction,
+  getAllTransactionsIncludingShared,
 } from "@/lib/firestore";
+import { getSharedAccountsByMember } from "@/lib/sharedAccounts";
 import {
   ArrowLeftIcon,
   CalendarIcon,
@@ -58,8 +64,12 @@ export default function ScheduledAnalyticsPage() {
   const [userPlan, setUserPlan] = useState<Plan>("free");
   const [loading, setLoading] = useState(true);
   const [accounts, setAccounts] = useState<any[]>([]);
+  const [sharedAccounts, setSharedAccounts] = useState<any[]>([]);
   const [transactions, setTransactions] = useState<any[]>([]);
+  const [sharedTransactions, setSharedTransactions] = useState<any[]>([]);
+  const [scheduledTransactions, setScheduledTransactions] = useState<any[]>([]);
   const [recurringTransactions, setRecurringTransactions] = useState<any[]>([]);
+  const [includeSharedAccounts, setIncludeSharedAccounts] = useState(false);
   const router = useRouter();
   const { toast, showToast, hideToast } = useToast();
 
@@ -80,11 +90,46 @@ export default function ScheduledAnalyticsPage() {
         const userAccounts = await getAccounts(currentUser.uid);
         setAccounts(userAccounts);
 
-        const userTransactions = await getTransactions(currentUser.uid);
-        setTransactions(userTransactions);
+        // Load shared accounts
+        const userSharedAccounts = await getSharedAccountsByMember(currentUser.uid);
+        setSharedAccounts(userSharedAccounts);
+        console.log('[Scheduled Analytics] Shared accounts:', userSharedAccounts.length);
+
+        // Load ALL transactions (personal + shared)
+        const allTransactions = await getAllTransactionsIncludingShared(currentUser.uid);
+        console.log('[Scheduled Analytics] All transactions:', allTransactions.length);
+        
+        // Separate personal and shared transactions
+        const personalTransactions = allTransactions.filter(tx => !tx.accountId?.startsWith("shared-") && !tx.isSharedAccountTransaction);
+        const sharedAccountTransactions = allTransactions.filter(tx => {
+          if (tx.accountId?.startsWith("shared-")) {
+            // Find the shared account to get its name and color
+            const accountIdWithoutPrefix = tx.accountId.replace("shared-", "");
+            const sharedAcc = userSharedAccounts.find(sa => sa.id === accountIdWithoutPrefix);
+            if (sharedAcc) {
+              tx.isSharedAccountTransaction = true;
+              tx.sharedAccountName = sharedAcc.name;
+              tx.sharedAccountColor = sharedAcc.color;
+            }
+            return true;
+          }
+          return tx.isSharedAccountTransaction === true;
+        });
+
+        console.log('[Scheduled Analytics] Personal transactions:', personalTransactions.length);
+        console.log('[Scheduled Analytics] Shared account transactions:', sharedAccountTransactions.length);
+        console.log('[Scheduled Analytics] Shared recurring:', sharedAccountTransactions.filter(t => t.isRecurring).length);
+        console.log('[Scheduled Analytics] Shared scheduled:', sharedAccountTransactions.filter(t => t.status === "scheduled").length);
+
+        setTransactions(personalTransactions);
+        setSharedTransactions(sharedAccountTransactions);
+
+        // Get scheduled transactions (only personal for now)
+        const scheduled = await getScheduledTransactions(currentUser.uid);
+        setScheduledTransactions(scheduled);
 
         // Filter recurring transactions
-        const recurring = userTransactions.filter((t) => t.isRecurring);
+        const recurring = personalTransactions.filter((t) => t.isRecurring);
         setRecurringTransactions(recurring);
 
         setLoading(false);
@@ -97,9 +142,22 @@ export default function ScheduledAnalyticsPage() {
     return () => unsubscribe();
   }, [router]);
 
+  // Combined transactions based on toggle
+  const combinedRecurringTransactions = useMemo(() => {
+    const personalRecurring = recurringTransactions;
+    const sharedRecurring = sharedTransactions.filter((t) => t.isRecurring);
+    return includeSharedAccounts ? [...personalRecurring, ...sharedRecurring] : personalRecurring;
+  }, [recurringTransactions, sharedTransactions, includeSharedAccounts]);
+
+  const combinedScheduledTransactions = useMemo(() => {
+    const personalScheduled = scheduledTransactions;
+    const sharedScheduled = sharedTransactions.filter((t) => t.status === "scheduled");
+    return includeSharedAccounts ? [...personalScheduled, ...sharedScheduled] : personalScheduled;
+  }, [scheduledTransactions, sharedTransactions, includeSharedAccounts]);
+
   // Calculate recurring impact (next 12 months)
   const recurringImpact = useMemo(() => {
-    if (!recurringTransactions.length) return null;
+    if (!combinedRecurringTransactions.length) return null;
 
     const months = Array.from({ length: 12 }, (_, i) => {
       const date = new Date();
@@ -109,7 +167,7 @@ export default function ScheduledAnalyticsPage() {
 
     const monthlyImpact = Array(12).fill(0);
 
-    recurringTransactions.forEach((transaction) => {
+    combinedRecurringTransactions.forEach((transaction) => {
       const multiplier = transaction.type === "income" ? 1 : transaction.type === "expense" ? -1 : 0;
       const amount = transaction.amount * multiplier;
 
@@ -146,7 +204,7 @@ export default function ScheduledAnalyticsPage() {
       };
     });
 
-    recurringTransactions.forEach((transaction) => {
+    combinedRecurringTransactions.forEach((transaction) => {
       days.forEach((day) => {
         let shouldInclude = false;
 
@@ -173,7 +231,7 @@ export default function ScheduledAnalyticsPage() {
     });
 
     return days;
-  }, [recurringTransactions]);
+  }, [combinedRecurringTransactions]);
 
   const canAccessTool = (requiredPlan: "pro" | "ultra"): boolean => {
     if (userPlan === "admin" || userPlan === "ultra") return true;
@@ -205,72 +263,458 @@ export default function ScheduledAnalyticsPage() {
           <ArrowLeftIcon className="w-4 h-4 group-hover:-translate-x-1 transition-transform" />
           Back
         </button>
-        <div>
+        <div className="flex-1">
           <h1 className="text-2xl font-semibold text-[#0F172A] mb-1">Scheduled Analytics</h1>
           <p className="text-sm text-gray-500">Manage and analyze recurring transactions</p>
         </div>
+        
+        {/* Include Shared Accounts Toggle */}
+        {sharedAccounts.length > 0 && (
+          <Checkbox
+            checked={includeSharedAccounts}
+            onChange={setIncludeSharedAccounts}
+            className="group flex items-center gap-2 cursor-pointer"
+          >
+            <div className={`w-4 h-4 rounded border-2 flex items-center justify-center transition-colors ${
+              includeSharedAccounts ? 'bg-blue-600 border-blue-600' : 'border-gray-300 bg-white'
+            }`}>
+              {includeSharedAccounts && (
+                <svg className="w-2.5 h-2.5 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                </svg>
+              )}
+            </div>
+            <span className="text-xs font-medium text-gray-600">Include Shared</span>
+          </Checkbox>
+        )}
       </div>
 
       {/* Main Content */}
-      <main className="px-8 py-8 bg-gray-50 min-h-screen space-y-6">
-        {/* Summary Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          <Card className="border border-gray-200 shadow-sm bg-white rounded-lg">
-            <CardBody className="p-5">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="p-2 bg-[#22C55E]/10 rounded-lg">
-                  <ClockIcon className="w-5 h-5 text-[#22C55E]" />
-                </div>
-                <span className="text-xs font-medium text-gray-500 uppercase">Active Recurring</span>
-              </div>
-              <p className="text-2xl font-semibold text-[#0F172A]">{recurringTransactions.length}</p>
-              <p className="text-xs text-gray-500 mt-1">Scheduled transactions</p>
-            </CardBody>
-          </Card>
+      <main className="px-8 py-8 bg-gray-50 min-h-screen space-y-8">
+        {/* Overview Section */}
+        <div className="space-y-4">
+          <div>
+            <h2 className="text-xl font-bold text-[#0F172A] mb-1">Overview</h2>
+            <p className="text-sm text-gray-500">Summary of your recurring and scheduled transactions</p>
+          </div>
 
-          <Card className="border border-gray-200 shadow-sm bg-white rounded-lg">
-            <CardBody className="p-5">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="p-2 bg-[#22C55E]/10 rounded-lg">
-                  <ArrowTrendingUpIcon className="w-5 h-5 text-[#22C55E]" />
+          {/* Summary Cards */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+            <Card className="border border-gray-200 shadow-sm bg-white rounded-lg">
+              <CardBody className="p-5">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="p-2 bg-[#22C55E]/10 rounded-lg">
+                    <ClockIcon className="w-5 h-5 text-[#22C55E]" />
+                  </div>
+                  <span className="text-xs font-medium text-gray-500 uppercase">Active Recurring</span>
                 </div>
-                <span className="text-xs font-medium text-gray-500 uppercase">Monthly Income</span>
-              </div>
-              <p className="text-2xl font-semibold text-[#0F172A]">
-                {currency.symbol}
-                {recurringTransactions
-                  .filter((t) => t.type === "income")
-                  .reduce((sum, t) => {
-                    const multiplier = t.recurringInterval === "monthly" ? 1 : t.recurringInterval === "weekly" ? 4 : t.recurringInterval === "daily" ? 30 : 0.083;
-                    return sum + t.amount * multiplier;
-                  }, 0)
-                  .toFixed(2)}
-              </p>
-            </CardBody>
-          </Card>
+                <p className="text-2xl font-semibold text-[#0F172A]">
+                  <AnimatedCounter
+                    value={combinedRecurringTransactions.length}
+                    duration={1.25}
+                    formatFn={(val) => Math.floor(val).toString()}
+                  />
+                </p>
+                <p className="text-xs text-gray-500 mt-1">Scheduled transactions</p>
+              </CardBody>
+            </Card>
 
-          <Card className="border border-gray-200 shadow-sm bg-white rounded-lg">
-            <CardBody className="p-5">
-              <div className="flex items-center gap-3 mb-3">
-                <div className="p-2 bg-red-500/10 rounded-lg">
-                  <ArrowTrendingDownIcon className="w-5 h-5 text-red-600" />
+            <Card className="border border-gray-200 shadow-sm bg-white rounded-lg">
+              <CardBody className="p-5">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="p-2 bg-[#22C55E]/10 rounded-lg">
+                    <ArrowTrendingUpIcon className="w-5 h-5 text-[#22C55E]" />
+                  </div>
+                  <span className="text-xs font-medium text-gray-500 uppercase">Monthly Income</span>
                 </div>
-                <span className="text-xs font-medium text-gray-500 uppercase">Monthly Expenses</span>
-              </div>
-              <p className="text-2xl font-semibold text-[#0F172A]">
-                {currency.symbol}
-                {recurringTransactions
-                  .filter((t) => t.type === "expense")
-                  .reduce((sum, t) => {
-                    const multiplier = t.recurringInterval === "monthly" ? 1 : t.recurringInterval === "weekly" ? 4 : t.recurringInterval === "daily" ? 30 : 0.083;
-                    return sum + t.amount * multiplier;
-                  }, 0)
-                  .toFixed(2)}
-              </p>
-            </CardBody>
-          </Card>
+                <p className="text-2xl font-semibold text-[#0F172A]">
+                  <AnimatedCounter
+                    value={combinedRecurringTransactions
+                      .filter((t) => t.type === "income")
+                      .reduce((sum, t) => {
+                        const multiplier = t.recurringInterval === "monthly" ? 1 : t.recurringInterval === "weekly" ? 4 : t.recurringInterval === "daily" ? 30 : 0.083;
+                        return sum + t.amount * multiplier;
+                      }, 0)}
+                    duration={1.25}
+                    formatFn={(val) => formatAmount(val)}
+                  />
+                </p>
+                <p className="text-xs text-gray-500 mt-1">From recurring income</p>
+              </CardBody>
+            </Card>
+
+            <Card className="border border-gray-200 shadow-sm bg-white rounded-lg">
+              <CardBody className="p-5">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="p-2 bg-red-500/10 rounded-lg">
+                    <ArrowTrendingDownIcon className="w-5 h-5 text-red-600" />
+                  </div>
+                  <span className="text-xs font-medium text-gray-500 uppercase">Monthly Expenses</span>
+                </div>
+                <p className="text-2xl font-semibold text-[#0F172A]">
+                  <AnimatedCounter
+                    value={combinedRecurringTransactions
+                      .filter((t) => t.type === "expense")
+                      .reduce((sum, t) => {
+                        const multiplier = t.recurringInterval === "monthly" ? 1 : t.recurringInterval === "weekly" ? 4 : t.recurringInterval === "daily" ? 30 : 0.083;
+                        return sum + t.amount * multiplier;
+                      }, 0)}
+                    duration={1.25}
+                    formatFn={(val) => formatAmount(val)}
+                  />
+                </p>
+                <p className="text-xs text-gray-500 mt-1">From recurring expenses</p>
+              </CardBody>
+            </Card>
+          </div>
         </div>
 
+        {/* Upcoming Transactions Section */}
+        {(combinedScheduledTransactions.length > 0 || combinedRecurringTransactions.length > 0) && (
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-xl font-bold text-[#0F172A] mb-1">Upcoming Transactions</h2>
+              <p className="text-sm text-gray-500">Next 3 scheduled or recurring transactions</p>
+            </div>
+
+            <Card className="border-2 border-blue-200 shadow-sm bg-gradient-to-br from-blue-50 to-white rounded-lg">
+              <CardBody className="p-6">
+                <div className="space-y-3">
+                  {(() => {
+                    // Combine scheduled and recurring transactions, calculate next occurrence dates
+                    const upcomingList = [
+                      ...combinedScheduledTransactions.map(tx => ({
+                        ...tx,
+                        nextDate: tx.date?.toDate ? tx.date.toDate() : new Date(tx.date),
+                        isScheduled: true,
+                      })),
+                      ...combinedRecurringTransactions.map(tx => {
+                        const now = new Date();
+                        let nextDate = new Date(now);
+                        
+                        // Calculate next occurrence based on interval
+                        switch (tx.recurringInterval) {
+                          case "daily":
+                            nextDate.setDate(now.getDate() + 1);
+                            break;
+                          case "weekly":
+                            nextDate.setDate(now.getDate() + 7);
+                            break;
+                          case "monthly":
+                            nextDate.setMonth(now.getMonth() + 1);
+                            break;
+                          case "yearly":
+                            nextDate.setFullYear(now.getFullYear() + 1);
+                            break;
+                        }
+                        
+                        return {
+                          ...tx,
+                          nextDate,
+                          isScheduled: false,
+                        };
+                      }),
+                    ]
+                    .sort((a, b) => a.nextDate.getTime() - b.nextDate.getTime())
+                    .slice(0, 3);
+
+                    if (upcomingList.length === 0) {
+                      return (
+                        <div className="text-center py-8 text-gray-500 text-sm">
+                          No upcoming transactions. Create a scheduled or recurring transaction to see it here.
+                        </div>
+                      );
+                    }
+
+                    return upcomingList.map((transaction, index) => {
+                      // Find account (personal or shared)
+                      let account = accounts.find((a) => a.id === transaction.accountId);
+                      let accountName = account?.name;
+                      let accountColor = account?.color;
+                      
+                      // Check if it's a shared account transaction
+                      if (transaction.isSharedAccountTransaction) {
+                        accountName = transaction.sharedAccountName;
+                        accountColor = transaction.sharedAccountColor;
+                      }
+                      
+                      const isOverdue = transaction.nextDate < new Date();
+
+                      return (
+                        <div
+                          key={`${transaction.id}-${index}`}
+                          className="flex items-center justify-between p-4 bg-white rounded-lg border-2 border-blue-100 hover:border-blue-200 transition-colors"
+                        >
+                          <div className="flex items-center gap-4 flex-1">
+                            {/* Icon */}
+                            <div
+                              className={`p-2.5 rounded-lg ${
+                                transaction.type === "income"
+                                  ? "bg-green-500/10"
+                                  : transaction.type === "expense"
+                                  ? "bg-red-500/10"
+                                  : "bg-blue-500/10"
+                              }`}
+                            >
+                              {transaction.type === "income" ? (
+                                <ArrowTrendingUpIcon className="w-5 h-5 text-green-500" />
+                              ) : transaction.type === "expense" ? (
+                                <ArrowTrendingDownIcon className="w-5 h-5 text-red-500" />
+                              ) : (
+                                <BanknotesIcon className="w-5 h-5 text-blue-500" />
+                              )}
+                            </div>
+
+                            {/* Details */}
+                            <div className="flex-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <p className="text-sm font-semibold text-[#0F172A]">{transaction.description}</p>
+                                {transaction.isRecurring && !transaction.isScheduled && (
+                                  <span className="px-2 py-0.5 bg-purple-500/10 text-purple-600 text-xs font-medium rounded-full">
+                                    Recurring
+                                  </span>
+                                )}
+                                {transaction.isScheduled && (
+                                  <span className="px-2 py-0.5 bg-blue-500/10 text-blue-600 text-xs font-medium rounded-full">
+                                    Scheduled
+                                  </span>
+                                )}
+                                {isOverdue && (
+                                  <span className="px-2 py-0.5 bg-red-500/10 text-red-600 text-xs font-medium rounded-full">
+                                    Overdue
+                                  </span>
+                                )}
+                              </div>
+                              <div className="flex items-center gap-3 mt-1">
+                                <span className="text-xs text-gray-500 font-medium">
+                                  📅 {transaction.nextDate.toLocaleDateString("en-GB", {
+                                    day: "2-digit",
+                                    month: "short",
+                                    year: "numeric",
+                                  })}
+                                </span>
+                                {accountName && (
+                                  <span
+                                    className="px-2 py-0.5 text-xs font-medium rounded-full"
+                                    style={{
+                                      backgroundColor: `${accountColor}20`,
+                                      color: accountColor || "#6B7280",
+                                    }}
+                                  >
+                                    {accountName}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Amount */}
+                            <div className="text-right">
+                              <p
+                                className={`text-lg font-bold ${
+                                  transaction.type === "income"
+                                    ? "text-green-600"
+                                    : transaction.type === "expense"
+                                    ? "text-red-600"
+                                    : "text-blue-600"
+                                }`}
+                              >
+                                {transaction.type === "expense" ? "-" : transaction.type === "income" ? "+" : ""}
+                                {formatAmount(transaction.amount)}
+                              </p>
+                            </div>
+
+                            {/* Execute Button for overdue scheduled transactions */}
+                            {isOverdue && transaction.isScheduled && (
+                              <Button
+                                size="sm"
+                                onClick={async () => {
+                                  try {
+                                    await executeScheduledTransaction(user.uid, transaction.id);
+                                    showToast("✅ Transaction executed successfully", "success");
+                                    
+                                    const scheduled = await getScheduledTransactions(user.uid);
+                                    setScheduledTransactions(scheduled);
+                                    
+                                    const userAccounts = await getAccounts(user.uid);
+                                    setAccounts(userAccounts);
+                                  } catch (error) {
+                                    console.error("Error executing transaction:", error);
+                                    showToast("❌ Failed to execute transaction", "error");
+                                  }
+                                }}
+                                className="bg-[#22C55E] text-white font-medium hover:bg-[#16A34A] transition-colors rounded-lg"
+                              >
+                                Execute
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
+              </CardBody>
+            </Card>
+          </div>
+        )}
+
+        {/* Scheduled Transactions Full List */}
+        {combinedScheduledTransactions.length > 3 && (
+          <div className="space-y-4">
+            <div>
+              <h2 className="text-xl font-bold text-[#0F172A] mb-1">All Scheduled Transactions</h2>
+              <p className="text-sm text-gray-500">View and manage all pending scheduled transactions</p>
+            </div>
+
+            <Card className="border border-gray-200 shadow-sm bg-white rounded-lg">
+              <CardBody className="p-6">
+                <div className="flex items-center justify-between mb-5">
+                  <div className="flex items-center gap-3">
+                    <div className="p-2 bg-blue-500/10 rounded-lg">
+                      <CalendarIcon className="w-5 h-5 text-blue-500" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-semibold text-[#0F172A]">Pending Transactions</h3>
+                      <p className="text-xs text-gray-500">Awaiting execution</p>
+                    </div>
+                  </div>
+                  <span className="px-3 py-1 bg-blue-500/10 text-blue-600 text-xs font-semibold rounded-full">
+                    {combinedScheduledTransactions.length} Total
+                  </span>
+                </div>
+
+                <div className="space-y-3">
+                  {combinedScheduledTransactions.slice(0, 10).map((transaction) => {
+                    const account = accounts.find((a) => a.id === transaction.accountId);
+                    const transactionDate = transaction.date?.toDate ? transaction.date.toDate() : new Date(transaction.date);
+                    const isOverdue = transactionDate < new Date();
+
+                    return (
+                      <div
+                        key={transaction.id}
+                        className="flex items-center justify-between p-4 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors border border-gray-200"
+                      >
+                        <div className="flex items-center gap-4 flex-1">
+                          {/* Icon */}
+                          <div
+                            className={`p-2 rounded-lg ${
+                              transaction.type === "income"
+                                ? "bg-green-500/10"
+                                : transaction.type === "expense"
+                                ? "bg-red-500/10"
+                                : "bg-blue-500/10"
+                            }`}
+                          >
+                            {transaction.type === "income" ? (
+                              <ArrowTrendingUpIcon className="w-5 h-5 text-green-500" />
+                            ) : transaction.type === "expense" ? (
+                              <ArrowTrendingDownIcon className="w-5 h-5 text-red-500" />
+                            ) : (
+                              <BanknotesIcon className="w-5 h-5 text-blue-500" />
+                            )}
+                          </div>
+
+                          {/* Details */}
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <p className="text-sm font-semibold text-[#0F172A]">{transaction.description}</p>
+                              {transaction.isRecurring && (
+                                <span className="px-2 py-0.5 bg-purple-500/10 text-purple-600 text-xs font-medium rounded-full">
+                                  Recurring
+                                </span>
+                              )}
+                              {isOverdue && (
+                                <span className="px-2 py-0.5 bg-red-500/10 text-red-600 text-xs font-medium rounded-full">
+                                  Overdue
+                                </span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-3 mt-1">
+                              <span className="text-xs text-gray-500">
+                                {transactionDate.toLocaleDateString("en-GB", {
+                                  day: "2-digit",
+                                  month: "short",
+                                  year: "numeric",
+                                })}
+                              </span>
+                              {account && (
+                                <span
+                                  className="px-2 py-0.5 text-xs font-medium rounded-full"
+                                  style={{
+                                    backgroundColor: `${account.color}20`,
+                                    color: account.color || "#6B7280",
+                                  }}
+                                >
+                                  {account.name}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Amount */}
+                          <div className="text-right">
+                            <p
+                              className={`text-base font-bold ${
+                                transaction.type === "income"
+                                  ? "text-green-600"
+                                  : transaction.type === "expense"
+                                  ? "text-red-600"
+                                  : "text-blue-600"
+                              }`}
+                            >
+                              {transaction.type === "expense" ? "-" : transaction.type === "income" ? "+" : ""}
+                              {formatAmount(transaction.amount)}
+                            </p>
+                          </div>
+
+                          {/* Execute Button */}
+                          {isOverdue && (
+                            <Button
+                              size="sm"
+                              onClick={async () => {
+                                try {
+                                  await executeScheduledTransaction(user.uid, transaction.id);
+                                  showToast("✅ Transaction executed successfully", "success");
+                                  
+                                  const scheduled = await getScheduledTransactions(user.uid);
+                                  setScheduledTransactions(scheduled);
+                                  
+                                  const userAccounts = await getAccounts(user.uid);
+                                  setAccounts(userAccounts);
+                                } catch (error) {
+                                  console.error("Error executing transaction:", error);
+                                  showToast("❌ Failed to execute transaction", "error");
+                                }
+                              }}
+                              className="bg-[#22C55E] text-white font-medium hover:bg-[#16A34A] transition-colors"
+                            >
+                              Execute
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {combinedScheduledTransactions.length > 10 && (
+                  <p className="text-xs text-gray-500 text-center mt-4">
+                    Showing 10 of {combinedScheduledTransactions.length} scheduled transactions
+                  </p>
+                )}
+              </CardBody>
+            </Card>
+          </div>
+        )}
+
+        {/* Planning Tools Section */}
+        <div className="space-y-4">
+          <div>
+            <h2 className="text-xl font-bold text-[#0F172A] mb-1">Planning Tools</h2>
+            <p className="text-sm text-gray-500">Analyze and optimize your recurring transactions</p>
+          </div>
+
+          <div className="space-y-6">
         {/* Scheduled Transactions Planner - PRO */}
         <Card className={`border-2 shadow-sm bg-white rounded-lg ${!canAccessTool("pro") ? "border-gray-200 opacity-60" : "border-gray-200"}`}>
           <CardBody className="p-6">
@@ -291,7 +735,7 @@ export default function ScheduledAnalyticsPage() {
 
             {canAccessTool("pro") ? (
               <div className="space-y-3 max-h-64 overflow-y-auto">
-                {recurringTransactions.length === 0 ? (
+                {combinedRecurringTransactions.length === 0 ? (
                   <div className="text-center py-8 text-gray-500 text-sm">
                     No recurring transactions yet. Create one from the Transactions page.
                   </div>
@@ -429,7 +873,7 @@ export default function ScheduledAnalyticsPage() {
                         x: { grid: { display: false } },
                         y: {
                           grid: { color: "#F3F4F6" },
-                          ticks: { callback: (value) => `{currency.symbol}${value}` },
+                          ticks: { callback: (value) => `${currency.symbol}${value}` },
                         },
                       },
                     }}
@@ -451,6 +895,8 @@ export default function ScheduledAnalyticsPage() {
 
         {/* What-If Simulator - ULTRA - REMOVED */}
         {/* Recurring Optimization Insights - ULTRA - REMOVED */}
+          </div>
+        </div>
       </main>
     </>
   );
